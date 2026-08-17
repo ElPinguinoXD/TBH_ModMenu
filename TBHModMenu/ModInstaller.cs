@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -28,18 +29,71 @@ internal static class ModInstaller
 
 
     // ============================================================
+    // INSTALL PROGRESS
+    // ============================================================
+
+    private static void ReportProgress(
+        Action<string, int>? progress,
+        string message,
+        int percent
+    )
+    {
+        progress?.Invoke(
+            message,
+            Math.Clamp(
+                percent,
+                0,
+                100
+            )
+        );
+    }
+    // ============================================================
     // MAIN INSTALL
     // ============================================================
 
-    public static bool EnsureInstalled()
+    public static bool EnsureInstalled(Action<string, int>? progress = null)
     {
         try
         {
+            // ====================================================
+            // PREPARAR
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Preparando instalación...",
+                5
+            );
+
+
             Directory.CreateDirectory(
                 ModDirectory
             );
 
+
+            // ====================================================
+            // CONFIG
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Preparando archivos del Mod Menu...",
+                12
+            );
+
+
             EnsureConfigFiles();
+
+
+            // ====================================================
+            // BUSCAR JUEGO
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Buscando Taskbar Hero...",
+                22
+            );
 
 
             string? gameDirectory =
@@ -47,16 +101,25 @@ internal static class ModInstaller
 
 
             // ====================================================
-            // NO SE ENCONTRÓ AUTOMÁTICAMENTE
+            // SELECCIÓN MANUAL
             // ====================================================
 
             if (gameDirectory == null)
             {
+                ReportProgress(
+                    progress,
+                    "Taskbar Hero no fue detectado automáticamente.",
+                    28
+                );
+
+
                 using FolderBrowserDialog dialog =
                     new FolderBrowserDialog();
 
+
                 dialog.Description =
                     "Selecciona la carpeta de Taskbar Hero";
+
 
                 dialog.UseDescriptionForTitle =
                     true;
@@ -76,10 +139,21 @@ internal static class ModInstaller
             }
 
 
+            // ====================================================
+            // VALIDAR JUEGO
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Verificando instalación de Taskbar Hero...",
+                35
+            );
+
+
             string gameExePath =
                 Path.Combine(
                     gameDirectory,
-                    GameExe
+                    "TaskBarHero.exe"
                 );
 
 
@@ -94,8 +168,16 @@ internal static class ModInstaller
                     MessageBoxIcon.Error
                 );
 
+
                 return false;
             }
+
+
+            ReportProgress(
+                progress,
+                "Taskbar Hero detectado.",
+                42
+            );
 
 
             // ====================================================
@@ -111,13 +193,9 @@ internal static class ModInstaller
             );
 
 
-            bool gameRunning =
-                Process
-                    .GetProcessesByName(
-                        "TaskBarHero"
-                    )
-                    .Length > 0;
-
+            // ====================================================
+            // PLUGIN
+            // ====================================================
 
             string pluginPath =
                 Path.Combine(
@@ -128,16 +206,25 @@ internal static class ModInstaller
                 );
 
 
+            bool gameRunning =
+                IsGameRunning();
+
+
             // ====================================================
-            // SI EL JUEGO ESTÁ ABIERTO
+            // JUEGO ABIERTO
             // ====================================================
 
             if (gameRunning)
             {
-                // Si ya está instalado, dejamos abrir el menú.
-
                 if (File.Exists(pluginPath))
                 {
+                    ReportProgress(
+                        progress,
+                        "Mod Menu ya instalado.",
+                        100
+                    );
+
+
                     return true;
                 }
 
@@ -145,18 +232,37 @@ internal static class ModInstaller
                 MessageBox.Show(
                     "Taskbar Hero está abierto y el plugin todavía " +
                     "no está instalado.\n\n" +
-                    "Cierra el juego y vuelve a abrir este programa.",
+                    "Cierra el juego y vuelve a abrir TBHModMenu.exe.",
                     "Taskbar Hero Mod",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
                 );
+
 
                 return false;
             }
 
 
             // ====================================================
-            // INSTALAR / ACTUALIZAR PAYLOAD
+            // INSTALL BEPINEX
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Preparando cargador BepInEx...",
+                50
+            );
+
+
+            ReportProgress(
+                progress,
+                "Instalando componentes de BepInEx...",
+                60
+            );
+
+
+            // ====================================================
+            // EXTRACT PAYLOAD
             // ====================================================
 
             ExtractPayload(
@@ -165,8 +271,15 @@ internal static class ModInstaller
 
 
             // ====================================================
-            // VERIFICAR
+            // VERIFY PLUGIN
             // ====================================================
+
+            ReportProgress(
+                progress,
+                "Instalando TBHPlugin.dll...",
+                78
+            );
+
 
             if (!File.Exists(pluginPath))
             {
@@ -175,6 +288,45 @@ internal static class ModInstaller
                     pluginPath
                 );
             }
+
+
+            // ====================================================
+            // CONFIGURAR LAUNCHER
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Configurando inicio seguro del Mod Menu...",
+                88
+            );
+
+
+            SetDoorstopEnabled(
+                false
+            );
+
+
+            // ====================================================
+            // FINAL
+            // ====================================================
+
+            ReportProgress(
+                progress,
+                "Verificando instalación...",
+                95
+            );
+
+
+            Thread.Sleep(
+                250
+            );
+
+
+            ReportProgress(
+                progress,
+                "Mod Menu completo. Abre Taskbar Hero desde Steam.",
+                100
+            );
 
 
             return true;
@@ -189,6 +341,7 @@ internal static class ModInstaller
                 MessageBoxIcon.Warning
             );
 
+
             return false;
         }
         catch (Exception ex)
@@ -200,6 +353,7 @@ internal static class ModInstaller
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
             );
+
 
             return false;
         }
@@ -937,6 +1091,542 @@ internal static class ModInstaller
         catch
         {
         }
+    }
+
+    // ============================================================
+    // GET CURRENT GAME DIRECTORY
+    // ============================================================
+
+    public static string? GetGameDirectory()
+    {
+        try
+        {
+            string savedPath =
+                Path.Combine(
+                    ModDirectory,
+                    "gamepath.txt"
+                );
+
+
+            if (File.Exists(savedPath))
+            {
+                string candidate =
+                    File.ReadAllText(
+                        savedPath
+                    ).Trim();
+
+
+                if (IsGameDirectory(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+
+            return FindGameDirectory();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+
+    // ============================================================
+    // FIND BEPINEX LOG
+    // ============================================================
+
+    private static string? FindBepInExLog(
+        string gameDirectory
+    )
+    {
+        string bepInEx =
+            Path.Combine(
+                gameDirectory,
+                "BepInEx"
+            );
+
+
+        string[] candidates =
+        {
+            Path.Combine(
+                bepInEx,
+                "LogOutput.log"
+            ),
+
+            Path.Combine(
+                bepInEx,
+                "LogOutput.txt"
+            ),
+
+            Path.Combine(
+                gameDirectory,
+                "LogOutput.log"
+            )
+        };
+
+
+        foreach (
+            string candidate
+            in candidates
+        )
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+
+        return null;
+    }
+
+
+    // ============================================================
+    // SAFE LOG LENGTH
+    // ============================================================
+
+    private static long GetLogLength(
+        string? path
+    )
+    {
+        try
+        {
+            if (
+                string.IsNullOrWhiteSpace(path) ||
+                !File.Exists(path)
+            )
+            {
+                return 0;
+            }
+
+
+            return new FileInfo(
+                path
+            ).Length;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+
+    // ============================================================
+    // READ ONLY NEW LOG DATA
+    // ============================================================
+
+    private static string ReadNewLogData(
+        string path,
+        ref long offset
+    )
+    {
+        try
+        {
+            using FileStream stream =
+                new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite |
+                    FileShare.Delete
+                );
+
+
+            // BepInEx pudo recrear el archivo.
+            if (
+                stream.Length <
+                offset
+            )
+            {
+                offset =
+                    0;
+            }
+
+
+            stream.Seek(
+                offset,
+                SeekOrigin.Begin
+            );
+
+
+            using StreamReader reader =
+                new StreamReader(
+                    stream
+                );
+
+
+            string text =
+                reader.ReadToEnd();
+
+
+            offset =
+                stream.Position;
+
+
+            return text;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+
+    // ============================================================
+    // WAIT FOR GAME + BEPINEX + TBH PLUGIN
+    // ============================================================
+
+    public static async Task<bool> WaitForModReadyAsync(
+        Action<string, int>? progress = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        string? gameDirectory =
+            GetGameDirectory();
+
+
+        if (gameDirectory == null)
+        {
+            progress?.Invoke(
+                "No se pudo localizar Taskbar Hero.",
+                0
+            );
+
+            return false;
+        }
+
+
+        string interopAssembly =
+            Path.Combine(
+                gameDirectory,
+                "BepInEx",
+                "interop",
+                "Assembly-CSharp.dll"
+            );
+
+
+        bool interopAlreadyExisted =
+            File.Exists(
+                interopAssembly
+            );
+
+
+        string? logPath =
+            FindBepInExLog(
+                gameDirectory
+            );
+
+
+        long logOffset =
+            GetLogLength(
+                logPath
+            );
+
+
+        string? currentLogPath =
+            logPath;
+
+
+        progress?.Invoke(
+            "Instalación completa. Abre Taskbar Hero desde Steam.",
+            0
+        );
+
+
+        // ========================================================
+        // ESPERAR A QUE EL USUARIO ABRA EL JUEGO
+        // ========================================================
+
+        while (
+            !IsGameRunning()
+        )
+        {
+            cancellationToken
+                .ThrowIfCancellationRequested();
+
+
+            await Task.Delay(
+                250,
+                cancellationToken
+            );
+        }
+
+
+        progress?.Invoke(
+            "Taskbar Hero detectado.",
+            10
+        );
+
+
+        await Task.Delay(
+            500,
+            cancellationToken
+        );
+
+
+        progress?.Invoke(
+            "Inicializando BepInEx...",
+            18
+        );
+
+
+        DateTime timeout =
+            DateTime.UtcNow.AddMinutes(
+                10
+            );
+
+
+        bool showedInterop =
+            false;
+
+        bool showedPluginLoading =
+            false;
+
+
+        while (
+            DateTime.UtcNow <
+            timeout
+        )
+        {
+            cancellationToken
+                .ThrowIfCancellationRequested();
+
+
+            // ====================================================
+            // BUSCAR LOG
+            // ====================================================
+
+            string? detectedLog =
+                FindBepInExLog(
+                    gameDirectory
+                );
+
+
+            if (
+                detectedLog != null &&
+                !string.Equals(
+                    detectedLog,
+                    currentLogPath,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                currentLogPath =
+                    detectedLog;
+
+                logOffset =
+                    0;
+            }
+
+
+            string newLog =
+                string.Empty;
+
+
+            if (
+                currentLogPath != null &&
+                File.Exists(currentLogPath)
+            )
+            {
+                newLog =
+                    ReadNewLogData(
+                        currentLogPath,
+                        ref logOffset
+                    );
+            }
+
+
+            string lower =
+                newLog.ToLowerInvariant();
+
+
+            // ====================================================
+            // CPP2IL
+            // ====================================================
+
+            if (
+                lower.Contains("cpp2il")
+            )
+            {
+                progress?.Invoke(
+                    "Analizando archivos IL2CPP del juego...",
+                    32
+                );
+
+                showedInterop =
+                    true;
+            }
+
+
+            // ====================================================
+            // INTEROP GENERATION
+            // ====================================================
+
+            if (
+                lower.Contains("interop") ||
+                lower.Contains("generating assemblies") ||
+                lower.Contains("generating interop")
+            )
+            {
+                progress?.Invoke(
+                    "Generando interop IL2CPP...",
+                    45
+                );
+
+                showedInterop =
+                    true;
+            }
+
+
+            // ====================================================
+            // SI ES PRIMER INICIO Y TODAVÍA NO EXISTE INTEROP
+            // ====================================================
+
+            if (
+                !interopAlreadyExisted &&
+                !File.Exists(interopAssembly) &&
+                !showedInterop
+            )
+            {
+                progress?.Invoke(
+                    "Primer inicio: preparando compatibilidad IL2CPP...",
+                    28
+                );
+
+                showedInterop =
+                    true;
+            }
+
+
+            // ====================================================
+            // INTEROP TERMINÓ
+            // ====================================================
+
+            if (
+                File.Exists(
+                    interopAssembly
+                )
+            )
+            {
+                if (!showedPluginLoading)
+                {
+                    progress?.Invoke(
+                        "Interop preparado. Cargando plugins...",
+                        68
+                    );
+
+                    showedPluginLoading =
+                        true;
+                }
+            }
+
+
+            // ====================================================
+            // BEPINEX CHAINLOADER
+            // ====================================================
+
+            if (
+                lower.Contains("chainloader") ||
+                lower.Contains("loading [")
+            )
+            {
+                progress?.Invoke(
+                    "Cargando componentes de BepInEx...",
+                    76
+                );
+            }
+
+
+            // ====================================================
+            // NUESTRO PLUGIN
+            // ====================================================
+
+            if (
+                lower.Contains("tbh plugin") ||
+                lower.Contains(
+                    "speedcontroller cargado correctamente"
+                ) ||
+                lower.Contains(
+                    "harmony patches cargados correctamente"
+                )
+            )
+            {
+                progress?.Invoke(
+                    "TBHPlugin cargado correctamente.",
+                    92
+                );
+
+
+                await Task.Delay(
+                    500,
+                    cancellationToken
+                );
+
+
+                progress?.Invoke(
+                    "✓ MOD ACTIVO",
+                    100
+                );
+
+
+                // El juego actual ya cargó Doorstop.
+                // Dejamos el próximo inicio en vanilla.
+                SetDoorstopEnabled(
+                    false
+                );
+
+
+                return true;
+            }
+
+
+            // ====================================================
+            // EL JUEGO SE CERRÓ
+            // ====================================================
+
+            if (
+                !IsGameRunning()
+            )
+            {
+                progress?.Invoke(
+                    "Taskbar Hero se cerró antes de completar la carga.",
+                    0
+                );
+
+
+                SetDoorstopEnabled(
+                    false
+                );
+
+
+                return false;
+            }
+
+
+            await Task.Delay(
+                200,
+                cancellationToken
+            );
+        }
+
+
+        // ========================================================
+        // TIMEOUT
+        // ========================================================
+
+        progress?.Invoke(
+            "La carga está tardando demasiado. Revisa el log de BepInEx.",
+            0
+        );
+
+
+        SetDoorstopEnabled(
+            false
+        );
+
+
+        return false;
     }
 
     // ============================================================
