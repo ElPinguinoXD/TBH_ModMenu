@@ -15,35 +15,23 @@ public class Form1 : Form
     // ============================================================
 
     [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(
-        IntPtr hWnd,
-        IntPtr hWndInsertAfter,
-        int X,
-        int Y,
-        int cx,
-        int cy,
-        uint uFlags);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(
-        IntPtr hWnd,
-        out RECT lpRect);
-
-    [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(
         int vKey);
 
     [DllImport("user32.dll")]
-    private static extern bool IsWindow(
-        IntPtr hWnd);
+    private static extern bool ReleaseCapture();
 
-    private struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(
+        IntPtr hWnd,
+        int Msg,
+        IntPtr wParam,
+        IntPtr lParam
+    );
+
+private const int WM_NCLBUTTONDOWN = 0x00A1;
+private const int HTCAPTION = 0x0002;
+
 
     // ============================================================
     // CONSTANTES
@@ -183,7 +171,7 @@ public class Form1 : Form
             FormBorderStyle.None;
 
         StartPosition =
-            FormStartPosition.Manual;
+            FormStartPosition.CenterScreen;
 
         ShowInTaskbar = false;
 
@@ -214,6 +202,25 @@ public class Form1 : Form
         };
 
         Controls.Add(header);
+
+        // ========================================================
+        // MOVER VENTANA DESDE EL HEADER
+        // ========================================================
+
+        header.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            ReleaseCapture();
+
+            SendMessage(
+                Handle,
+                WM_NCLBUTTONDOWN,
+                new IntPtr(HTCAPTION),
+                IntPtr.Zero
+            );
+        };
 
         var topAccent = new Panel
         {
@@ -2014,81 +2021,6 @@ public class Form1 : Form
 
         if (!menuVisible)
             return;
-
-        IntPtr hwnd =
-            gameProcess.MainWindowHandle;
-
-        if (
-            hwnd == IntPtr.Zero ||
-            !IsWindow(hwnd)
-        )
-        {
-            return;
-        }
-
-        if (
-            !GetWindowRect(
-                hwnd,
-                out RECT rect
-            )
-        )
-        {
-            return;
-        }
-
-       int x =
-            rect.Left + 20;
-
-        int y =
-            rect.Top + 20;
-
-
-        // ============================================================
-        // NO TOCAR LA VENTANA MIENTRAS SE USA EL SELECTOR DE HÉROE
-        // ============================================================
-
-        if (
-            heroComboBox.Focused ||
-            heroComboBox.DroppedDown
-        )
-        {
-            return;
-        }
-
-
-        // ============================================================
-        // SOLO REPOSICIONAR SI REALMENTE CAMBIÓ DE POSICIÓN
-        // ============================================================
-
-        if (
-            Left == x &&
-            Top == y
-        )
-        {
-            return;
-        }
-
-
-        // SWP_NOSIZE      = 0x0001
-        // SWP_NOZORDER    = 0x0004
-        // SWP_NOACTIVATE  = 0x0010
-        //
-        // Total = 0x0015
-        //
-        // TopMost ya está configurado en el Form,
-        // por eso NO necesitamos mandar HWND_TOPMOST
-        // cada 50 ms.
-        // ============================================================
-
-        SetWindowPos(
-            Handle,
-            IntPtr.Zero,
-            x,
-            y,
-            0,
-            0,
-            0x0015
-        );
     }
 
     // ============================================================

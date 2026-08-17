@@ -12,25 +12,81 @@ internal static class Program
         // INSTALAR / ACTUALIZAR MOD
         // ========================================================
 
-        if (!ModInstaller.EnsureInstalled())
+        if (
+            !ModInstaller.EnsureInstalled()
+        )
         {
             return;
         }
 
 
-        // ========================================================
-        // ABRIR TASKBAR HERO
-        // ========================================================
+        // ============================================================
+        // NO INTENTAR ACTIVAR EL MOD SOBRE UNA PARTIDA ABIERTA
+        // ============================================================
 
-        ModInstaller.LaunchGameIfNeeded();
+        if (
+            ModInstaller.IsGameRunning()
+        )
+        {
+            // Asegurarnos de que el próximo inicio sea vanilla.
+
+            ModInstaller.SetDoorstopEnabled(
+                false
+            );
 
 
-        // ========================================================
-        // ABRIR MOD MENU
-        // ========================================================
+            MessageBox.Show(
+                "Taskbar Hero ya está abierto.\n\n" +
+                "Cierra el juego y después abre TBHModMenu.exe " +
+                "para iniciar Taskbar Hero con el mod.",
+                "Taskbar Hero Mod",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
 
-        Application.Run(
-            new Form1()
+
+            return;
+        }
+
+
+        // ============================================================
+        // ACTIVAR BEPINEX SOLO PARA ESTE INICIO
+        // ============================================================
+
+        ModInstaller.SetDoorstopEnabled(
+            true
         );
+
+
+        try
+        {
+
+            // ========================================================
+            // RESTAURAR VANILLA PARA EL SIGUIENTE INICIO
+            // ========================================================
+
+            _ =
+                ModInstaller
+                    .DisableBepInExAfterGameStartsAsync();
+
+
+            // ========================================================
+            // ABRIR MENU
+            // ========================================================
+
+            Application.Run(
+                new Form1()
+            );
+        }
+        finally
+        {
+            // ========================================================
+            // SEGURIDAD EXTRA
+            // ========================================================
+
+            ModInstaller.SetDoorstopEnabled(
+                false
+            );
+        }
     }
 }

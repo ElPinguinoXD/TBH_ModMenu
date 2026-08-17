@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -676,6 +677,231 @@ internal static class ModInstaller
         return null;
     }
 
+    // ============================================================
+// GAME RUNNING
+// ============================================================
+
+public static bool IsGameRunning()
+{
+    try
+    {
+        Process[] processes =
+            Process.GetProcessesByName(
+                "TaskBarHero"
+            );
+
+        bool running =
+            processes.Length > 0;
+
+        foreach (
+            Process process
+            in processes
+        )
+        {
+            process.Dispose();
+        }
+
+        return running;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+
+// ============================================================
+// ENABLE / DISABLE BEPINEX
+// ============================================================
+
+public static void SetDoorstopEnabled(
+    bool enabled
+)
+{
+    try
+    {
+        string? gameDirectory =
+            null;
+
+
+        string savedPath =
+            Path.Combine(
+                ModDirectory,
+                "gamepath.txt"
+            );
+
+
+        // ====================================================
+        // RUTA GUARDADA
+        // ====================================================
+
+        if (
+            File.Exists(
+                savedPath
+            )
+        )
+        {
+            string candidate =
+                File
+                    .ReadAllText(
+                        savedPath
+                    )
+                    .Trim();
+
+
+            if (
+                IsGameDirectory(
+                    candidate
+                )
+            )
+            {
+                gameDirectory =
+                    candidate;
+            }
+        }
+
+
+        // ====================================================
+        // BUSCAR STEAM
+        // ====================================================
+
+        if (gameDirectory == null)
+        {
+            gameDirectory =
+                FindGameDirectory();
+        }
+
+
+        if (gameDirectory == null)
+        {
+            return;
+        }
+
+
+        string configPath =
+            Path.Combine(
+                gameDirectory,
+                "doorstop_config.ini"
+            );
+
+
+        if (!File.Exists(configPath))
+        {
+            return;
+        }
+
+
+        string text =
+            File.ReadAllText(
+                configPath
+            );
+
+
+        string value =
+            enabled
+                ? "true"
+                : "false";
+
+
+        Regex regex =
+            new Regex(
+                @"^(\s*enabled\s*=\s*).*$",
+                RegexOptions.IgnoreCase |
+                RegexOptions.Multiline
+            );
+
+
+        if (
+            regex.IsMatch(
+                text
+            )
+        )
+        {
+            text =
+                regex.Replace(
+                    text,
+                    "${1}" + value,
+                    1
+                );
+        }
+        else
+        {
+            text =
+                "[UnityDoorstop]" +
+                Environment.NewLine +
+                "enabled=" +
+                value +
+                Environment.NewLine +
+                Environment.NewLine +
+                text;
+        }
+
+
+        File.WriteAllText(
+            configPath,
+            text
+        );
+    }
+    catch (Exception ex)
+    {
+        MessageBox.Show(
+            "No se pudo cambiar el estado de BepInEx:\n\n" +
+            ex.Message,
+            "Taskbar Hero Mod",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning
+        );
+    }
+}
+
+
+// ============================================================
+// RESET BEPINEX AFTER LAUNCH
+// ============================================================
+
+public static async Task
+    DisableBepInExAfterGameStartsAsync()
+{
+    try
+    {
+        // ====================================================
+        // ESPERAR HASTA QUE EL USUARIO ABRA EL JUEGO
+        // ====================================================
+
+        while (
+            !IsGameRunning()
+        )
+        {
+            await Task.Delay(
+                250
+            );
+        }
+
+
+        // ====================================================
+        // DAR TIEMPO A DOORSTOP / BEPINEX PARA CARGAR
+        // ====================================================
+
+        await Task.Delay(
+            10000
+        );
+
+
+        // ====================================================
+        // EL SIGUIENTE INICIO SERÁ VANILLA
+        // ====================================================
+
+        SetDoorstopEnabled(
+            false
+        );
+    }
+    catch
+    {
+        SetDoorstopEnabled(
+            false
+        );
+    }
+}
 
     // ============================================================
     // LAUNCH GAME
