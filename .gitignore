@@ -1,0 +1,139 @@
+# ==========================================================
+# BUILD
+# ==========================================================
+**/bin/
+**/obj/
+.vs/
+
+# ==========================================================
+# USER / IDE
+# ==========================================================
+*.user
+*.suo
+
+# ==========================================================
+# RUNTIME FILES DEL MOD
+# ==========================================================
+gamespeed.txt
+hero_command.txt
+
+attackdamage.txt
+damage_command.txt
+
+attackspeed.txt
+attackspeed_command.txt
+
+movementspeed.txt
+movementspeed_command.txt
+
+godmode.txt
+moneymultiplier.txt
+
+# ==========================================================
+# LOGS / DEBUG / DUMPS
+# ==========================================================
+*.log
+*_interop.txt
+*_interop_*.txt
+*_dump.txt
+*_full.txt
+
+InteropDump/
+
+# ==========================================================
+# NO SUBIR ARCHIVOS DEL JUEGO / INTEROP GENERADO
+# ==========================================================
+BepInEx/
+TBH_PORT/
+
+Assembly-CSharp.dll
+GameAssembly.dll
+
+**/Assembly-CSharp.dll
+**/GameAssembly.dll
+
+# Unity / IL2CPP binaries copiados localmente
+**/UnityEngine*.dll
+**/Il2Cpp*.dll
+
+# ==========================================================
+# TEMP
+# ==========================================================
+*.tmp
+*.bak
+*.old
+
+# ==========================================================
+# ARCHIVOS DE INVESTIGACIÓN / REVERSE ENGINEERING
+# ==========================================================
+
+# Dumps .txt ubicados en la raíz del proyecto
+/*.txt
+
+# Interop / metadata / dumps
+*_interop.txt
+*_interop_*.txt
+*_refs.txt
+*_runtime.txt
+*_exact.txt
+*_real.txt
+*_section.txt
+*_class.txt
+*_methods.txt
+*_dump.txt
+*_full.txt
+
+# Otros artefactos de investigación
+InteropDump/
+TBH_PORT/
+
+# ==========================================================
+# BUILD
+# ==========================================================
+
+**/bin/
+**/obj/
+.vs/
+
+# ==========================================================
+# DLL / BINARIOS DEL JUEGO
+# ==========================================================
+
+Assembly-CSharp.dll
+GameAssembly.dll
+**/Assembly-CSharp.dll
+**/GameAssembly.dll
+**/UnityEngine*.dll
+**/Il2Cpp*.dll
+
+BepInEx/
+
+# ==========================================================
+# ARCHIVOS RUNTIME DEL MOD
+# ==========================================================
+
+gamespeed.txt
+hero_command.txt
+
+attackdamage.txt
+damage_command.txt
+
+attackspeed.txt
+attackspeed_command.txt
+
+movementspeed.txt
+movementspeed_command.txt
+
+godmode.txt
+moneymultiplier.txt
+
+# ==========================================================
+# TEMPORALES
+# ==========================================================
+
+*.log
+*.tmp
+*.bak
+*.old
+*.user
+*.suo
