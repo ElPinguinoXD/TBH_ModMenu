@@ -2,12 +2,17 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
+
 namespace TBHModMenu;
 
 internal sealed class InstallProgressForm : Form
 {
     private readonly Label statusLabel;
     private readonly Label percentLabel;
+
+    private readonly Button uninstallButton;
+
+    public event EventHandler? UninstallRequested;
 
     private readonly Panel progressTrack;
     private readonly Panel progressFill;
@@ -17,6 +22,41 @@ internal sealed class InstallProgressForm : Form
     private string lastStatus =
         string.Empty;
 
+    // ============================================================
+    // UNINSTALL BUTTON VISIBILITY
+    // ============================================================
+
+    public void ShowUninstallButton(
+        bool visible
+    )
+    {
+        if (
+            IsDisposed ||
+            Disposing
+        )
+        {
+            return;
+        }
+
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(
+                new Action(
+                    () =>
+                        ShowUninstallButton(
+                            visible
+                        )
+                )
+            );
+
+            return;
+        }
+
+
+        uninstallButton.Visible =
+            visible;
+    }
 
     public InstallProgressForm()
     {
@@ -30,7 +70,7 @@ internal sealed class InstallProgressForm : Form
             520;
 
         Height =
-            340;
+            395;
 
         StartPosition =
             FormStartPosition.CenterScreen;
@@ -334,6 +374,81 @@ internal sealed class InstallProgressForm : Form
             logBox
         );
 
+        // ========================================================
+        // UNINSTALL BUTTON
+        // ========================================================
+
+        uninstallButton =
+            new Button
+            {
+                Text =
+                    "LIMPIAR / DESINSTALAR MOD",
+
+                ForeColor =
+                    Color.White,
+
+                BackColor =
+                    Color.FromArgb(
+                        190,
+                        55,
+                        85
+                    ),
+
+                FlatStyle =
+                    FlatStyle.Flat,
+
+                Font =
+                    new Font(
+                        "Segoe UI",
+                        9,
+                        FontStyle.Bold
+                    ),
+
+                Cursor =
+                    Cursors.Hand,
+
+                Location =
+                    new Point(
+                        26,
+                        300
+                    ),
+
+                Size =
+                    new Size(
+                        458,
+                        38
+                    ),
+
+                Visible =
+                    false
+            };
+
+
+        uninstallButton.FlatAppearance.BorderSize =
+            0;
+
+
+        uninstallButton.FlatAppearance.MouseOverBackColor =
+            Color.FromArgb(
+                220,
+                75,
+                105
+            );
+
+
+        uninstallButton.Click +=
+            (_, _) =>
+            {
+                UninstallRequested?.Invoke(
+                    this,
+                    EventArgs.Empty
+                );
+            };
+
+
+        Controls.Add(
+            uninstallButton
+        );
 
         SetProgress(
             "Preparando instalación...",

@@ -153,6 +153,7 @@ private const int HTCAPTION = 0x0002;
 
     private readonly Label resultLabel;
 
+    
     // ============================================================
     // CONSTRUCTOR
     // ============================================================
