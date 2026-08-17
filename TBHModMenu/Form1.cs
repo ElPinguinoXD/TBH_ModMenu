@@ -183,7 +183,7 @@ private const int HTCAPTION = 0x0002;
         Opacity = 0.97;
 
         Width = 390;
-        Height = 760;
+        Height = 835;
 
         // ========================================================
         // HEADER
@@ -944,6 +944,88 @@ private const int HTCAPTION = 0x0002;
         );
 
         // ========================================================
+        // UNINSTALL MOD
+        // ========================================================
+
+        var uninstallButton =
+            new Button
+            {
+                Text =
+                    "LIMPIAR / DESINSTALAR MOD",
+
+                ForeColor =
+                    Color.White,
+
+                BackColor =
+                    dangerColor,
+
+                FlatStyle =
+                    FlatStyle.Flat,
+
+                Font =
+                    new Font(
+                        "Segoe UI",
+                        9,
+                        FontStyle.Bold
+                    ),
+
+                Cursor =
+                    Cursors.Hand,
+
+                Location =
+                    new Point(
+                        20,
+                        735
+                    ),
+
+                Size =
+                    new Size(
+                        350,
+                        40
+                    )
+            };
+
+        uninstallButton.FlatAppearance.BorderSize =
+            0;
+
+        uninstallButton.FlatAppearance.MouseOverBackColor =
+            Color.FromArgb(
+                220,
+                75,
+                105
+            );
+
+        uninstallButton.Click += (_, _) =>
+        {
+            DialogResult confirmation =
+                MessageBox.Show(
+                    "¿Quieres eliminar el mod de la instalación de Taskbar Hero?",
+                    "Desinstalar mod",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+            if (
+                confirmation !=
+                DialogResult.Yes
+            )
+            {
+                return;
+            }
+
+            if (
+                ModInstaller.UninstallMod()
+            )
+            {
+                Close();
+            }
+        };
+
+        Controls.Add(
+            uninstallButton
+        );
+
+        // ========================================================
         // RESULT
         // ========================================================
 
@@ -969,7 +1051,7 @@ private const int HTCAPTION = 0x0002;
                 Location =
                     new Point(
                         22,
-                        730
+                        785
                     )
             };
 
@@ -1001,7 +1083,7 @@ private const int HTCAPTION = 0x0002;
                 Location =
                     new Point(
                         225,
-                        730
+                        785
                     )
             };
 

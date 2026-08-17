@@ -678,230 +678,230 @@ internal static class ModInstaller
     }
 
     // ============================================================
-// GAME RUNNING
-// ============================================================
+    // GAME RUNNING
+    // ============================================================
 
-public static bool IsGameRunning()
-{
-    try
+    public static bool IsGameRunning()
     {
-        Process[] processes =
-            Process.GetProcessesByName(
-                "TaskBarHero"
-            );
-
-        bool running =
-            processes.Length > 0;
-
-        foreach (
-            Process process
-            in processes
-        )
+        try
         {
-            process.Dispose();
-        }
+            Process[] processes =
+                Process.GetProcessesByName(
+                    "TaskBarHero"
+                );
 
-        return running;
-    }
-    catch
-    {
-        return false;
-    }
-}
+            bool running =
+                processes.Length > 0;
 
-
-// ============================================================
-// ENABLE / DISABLE BEPINEX
-// ============================================================
-
-public static void SetDoorstopEnabled(
-    bool enabled
-)
-{
-    try
-    {
-        string? gameDirectory =
-            null;
-
-
-        string savedPath =
-            Path.Combine(
-                ModDirectory,
-                "gamepath.txt"
-            );
-
-
-        // ====================================================
-        // RUTA GUARDADA
-        // ====================================================
-
-        if (
-            File.Exists(
-                savedPath
+            foreach (
+                Process process
+                in processes
             )
-        )
-        {
-            string candidate =
-                File
-                    .ReadAllText(
-                        savedPath
-                    )
-                    .Trim();
+            {
+                process.Dispose();
+            }
 
+            return running;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+
+    // ============================================================
+    // ENABLE / DISABLE BEPINEX
+    // ============================================================
+
+    public static void SetDoorstopEnabled(
+        bool enabled
+    )
+    {
+        try
+        {
+            string? gameDirectory =
+                null;
+
+
+            string savedPath =
+                Path.Combine(
+                    ModDirectory,
+                    "gamepath.txt"
+                );
+
+
+            // ====================================================
+            // RUTA GUARDADA
+            // ====================================================
 
             if (
-                IsGameDirectory(
-                    candidate
+                File.Exists(
+                    savedPath
                 )
             )
             {
-                gameDirectory =
-                    candidate;
+                string candidate =
+                    File
+                        .ReadAllText(
+                            savedPath
+                        )
+                        .Trim();
+
+
+                if (
+                    IsGameDirectory(
+                        candidate
+                    )
+                )
+                {
+                    gameDirectory =
+                        candidate;
+                }
             }
-        }
 
 
-        // ====================================================
-        // BUSCAR STEAM
-        // ====================================================
+            // ====================================================
+            // BUSCAR STEAM
+            // ====================================================
 
-        if (gameDirectory == null)
-        {
-            gameDirectory =
-                FindGameDirectory();
-        }
-
-
-        if (gameDirectory == null)
-        {
-            return;
-        }
+            if (gameDirectory == null)
+            {
+                gameDirectory =
+                    FindGameDirectory();
+            }
 
 
-        string configPath =
-            Path.Combine(
-                gameDirectory,
-                "doorstop_config.ini"
-            );
+            if (gameDirectory == null)
+            {
+                return;
+            }
 
 
-        if (!File.Exists(configPath))
-        {
-            return;
-        }
-
-
-        string text =
-            File.ReadAllText(
-                configPath
-            );
-
-
-        string value =
-            enabled
-                ? "true"
-                : "false";
-
-
-        Regex regex =
-            new Regex(
-                @"^(\s*enabled\s*=\s*).*$",
-                RegexOptions.IgnoreCase |
-                RegexOptions.Multiline
-            );
-
-
-        if (
-            regex.IsMatch(
-                text
-            )
-        )
-        {
-            text =
-                regex.Replace(
-                    text,
-                    "${1}" + value,
-                    1
+            string configPath =
+                Path.Combine(
+                    gameDirectory,
+                    "doorstop_config.ini"
                 );
-        }
-        else
-        {
-            text =
-                "[UnityDoorstop]" +
-                Environment.NewLine +
-                "enabled=" +
-                value +
-                Environment.NewLine +
-                Environment.NewLine +
-                text;
-        }
 
 
-        File.WriteAllText(
-            configPath,
-            text
-        );
-    }
-    catch (Exception ex)
-    {
-        MessageBox.Show(
-            "No se pudo cambiar el estado de BepInEx:\n\n" +
-            ex.Message,
-            "Taskbar Hero Mod",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Warning
-        );
-    }
-}
+            if (!File.Exists(configPath))
+            {
+                return;
+            }
 
 
-// ============================================================
-// RESET BEPINEX AFTER LAUNCH
-// ============================================================
+            string text =
+                File.ReadAllText(
+                    configPath
+                );
 
-public static async Task
-    DisableBepInExAfterGameStartsAsync()
-{
-    try
-    {
-        // ====================================================
-        // ESPERAR HASTA QUE EL USUARIO ABRA EL JUEGO
-        // ====================================================
 
-        while (
-            !IsGameRunning()
-        )
-        {
-            await Task.Delay(
-                250
+            string value =
+                enabled
+                    ? "true"
+                    : "false";
+
+
+            Regex regex =
+                new Regex(
+                    @"^(\s*enabled\s*=\s*).*$",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.Multiline
+                );
+
+
+            if (
+                regex.IsMatch(
+                    text
+                )
+            )
+            {
+                text =
+                    regex.Replace(
+                        text,
+                        "${1}" + value,
+                        1
+                    );
+            }
+            else
+            {
+                text =
+                    "[UnityDoorstop]" +
+                    Environment.NewLine +
+                    "enabled=" +
+                    value +
+                    Environment.NewLine +
+                    Environment.NewLine +
+                    text;
+            }
+
+
+            File.WriteAllText(
+                configPath,
+                text
             );
         }
-
-
-        // ====================================================
-        // DAR TIEMPO A DOORSTOP / BEPINEX PARA CARGAR
-        // ====================================================
-
-        await Task.Delay(
-            10000
-        );
-
-
-        // ====================================================
-        // EL SIGUIENTE INICIO SERÁ VANILLA
-        // ====================================================
-
-        SetDoorstopEnabled(
-            false
-        );
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "No se pudo cambiar el estado de BepInEx:\n\n" +
+                ex.Message,
+                "Taskbar Hero Mod",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+        }
     }
-    catch
+
+
+    // ============================================================
+    // RESET BEPINEX AFTER LAUNCH
+    // ============================================================
+
+    public static async Task
+        DisableBepInExAfterGameStartsAsync()
     {
-        SetDoorstopEnabled(
-            false
-        );
+        try
+        {
+            // ====================================================
+            // ESPERAR HASTA QUE EL USUARIO ABRA EL JUEGO
+            // ====================================================
+
+            while (
+                !IsGameRunning()
+            )
+            {
+                await Task.Delay(
+                    250
+                );
+            }
+
+
+            // ====================================================
+            // DAR TIEMPO A DOORSTOP / BEPINEX PARA CARGAR
+            // ====================================================
+
+            await Task.Delay(
+                10000
+            );
+
+
+            // ====================================================
+            // EL SIGUIENTE INICIO SERÁ VANILLA
+            // ====================================================
+
+            SetDoorstopEnabled(
+                false
+            );
+        }
+        catch
+        {
+            SetDoorstopEnabled(
+                false
+            );
+        }
     }
-}
 
     // ============================================================
     // LAUNCH GAME
@@ -936,6 +936,301 @@ public static async Task
         }
         catch
         {
+        }
+    }
+
+    // ============================================================
+    // UNINSTALL / CLEAN MOD
+    // ============================================================
+
+    public static bool UninstallMod()
+    {
+        try
+        {
+            // ====================================================
+            // NO LIMPIAR CON EL JUEGO ABIERTO
+            // ====================================================
+
+            if (IsGameRunning())
+            {
+                MessageBox.Show(
+                    "Taskbar Hero está abierto.\n\n" +
+                    "Cierra el juego antes de limpiar el mod.",
+                    "Taskbar Hero Mod",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return false;
+            }
+
+
+            // ====================================================
+            // LOCALIZAR JUEGO
+            // ====================================================
+
+            string? gameDirectory =
+                null;
+
+            string savedPath =
+                Path.Combine(
+                    ModDirectory,
+                    "gamepath.txt"
+                );
+
+
+            if (File.Exists(savedPath))
+            {
+                string candidate =
+                    File.ReadAllText(
+                        savedPath
+                    ).Trim();
+
+                if (IsGameDirectory(candidate))
+                {
+                    gameDirectory =
+                        candidate;
+                }
+            }
+
+
+            if (gameDirectory == null)
+            {
+                gameDirectory =
+                    FindGameDirectory();
+            }
+
+
+            if (gameDirectory == null)
+            {
+                MessageBox.Show(
+                    "No se pudo encontrar la instalación de Taskbar Hero.",
+                    "Taskbar Hero Mod",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+
+                return false;
+            }
+
+
+            // ====================================================
+            // DESACTIVAR BEPINEX
+            // ====================================================
+
+            SetDoorstopEnabled(
+                false
+            );
+
+
+            string bepInExDirectory =
+                Path.Combine(
+                    gameDirectory,
+                    "BepInEx"
+                );
+
+            string pluginsDirectory =
+                Path.Combine(
+                    bepInExDirectory,
+                    "plugins"
+                );
+
+            string pluginPath =
+                Path.Combine(
+                    pluginsDirectory,
+                    "TBHPlugin.dll"
+                );
+
+
+            // ====================================================
+            // ELIMINAR NUESTRO PLUGIN
+            // ====================================================
+
+            if (File.Exists(pluginPath))
+            {
+                File.Delete(
+                    pluginPath
+                );
+            }
+
+
+            // ====================================================
+            // ELIMINAR CONFIG PROPIA SI EXISTE
+            // ====================================================
+
+            string pluginConfig =
+                Path.Combine(
+                    bepInExDirectory,
+                    "config",
+                    "com.pengx.taskbarhero.mod.cfg"
+                );
+
+
+            if (File.Exists(pluginConfig))
+            {
+                File.Delete(
+                    pluginConfig
+                );
+            }
+
+
+            // ====================================================
+            // COMPROBAR SI EXISTEN OTROS MODS
+            // ====================================================
+
+            bool otherPluginsExist =
+                false;
+
+
+            if (
+                Directory.Exists(
+                    pluginsDirectory
+                )
+            )
+            {
+                otherPluginsExist =
+                    Directory
+                        .EnumerateFiles(
+                            pluginsDirectory,
+                            "*",
+                            SearchOption.AllDirectories
+                        )
+                        .Any();
+            }
+
+
+            // ====================================================
+            // HAY OTROS MODS
+            // ====================================================
+
+            if (otherPluginsExist)
+            {
+                MessageBox.Show(
+                    "TBHPlugin.dll fue eliminado correctamente.\n\n" +
+                    "Se detectaron otros archivos dentro de " +
+                    "BepInEx\\plugins, así que BepInEx se conservará " +
+                    "para no afectar otros mods.",
+                    "Mod eliminado",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+
+                return true;
+            }
+
+
+            // ====================================================
+            // PREGUNTAR POR LIMPIEZA COMPLETA
+            // ====================================================
+
+            DialogResult result =
+                MessageBox.Show(
+                    "TBHPlugin.dll fue eliminado.\n\n" +
+
+                    "No se detectaron otros plugins de BepInEx.\n\n" +
+
+                    "¿Quieres eliminar también BepInEx y Doorstop " +
+                    "de la carpeta de Taskbar Hero?\n\n" +
+
+                    "Esto devolverá la instalación del juego a un " +
+                    "estado sin el cargador del mod.",
+
+                    "Limpieza completa",
+
+                    MessageBoxButtons.YesNo,
+
+                    MessageBoxIcon.Question
+                );
+
+
+            if (
+                result ==
+                DialogResult.Yes
+            )
+            {
+                // ================================================
+                // BEPINEX
+                // ================================================
+
+                if (
+                    Directory.Exists(
+                        bepInExDirectory
+                    )
+                )
+                {
+                    Directory.Delete(
+                        bepInExDirectory,
+                        true
+                    );
+                }
+
+
+                // ================================================
+                // DOORSTOP
+                // ================================================
+
+                string[] rootFiles =
+                {
+                    "winhttp.dll",
+                    "doorstop_config.ini",
+                    ".doorstop_version"
+                };
+
+
+                foreach (
+                    string file
+                    in rootFiles
+                )
+                {
+                    string path =
+                        Path.Combine(
+                            gameDirectory,
+                            file
+                        );
+
+
+                    if (File.Exists(path))
+                    {
+                        File.Delete(
+                            path
+                        );
+                    }
+                }
+
+
+                MessageBox.Show(
+                    "La instalación del mod fue eliminada completamente.\n\n" +
+                    "Taskbar Hero volverá a iniciar normalmente desde Steam.",
+                    "Limpieza completada",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+            else
+            {
+                MessageBox.Show(
+                    "TBHPlugin.dll fue eliminado.\n\n" +
+                    "BepInEx se ha conservado pero permanece desactivado.",
+                    "Mod eliminado",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "No se pudo limpiar el mod:\n\n" +
+                ex.Message,
+                "Taskbar Hero Mod",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+
+            return false;
         }
     }
 }
