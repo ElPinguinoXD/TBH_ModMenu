@@ -6,6 +6,31 @@ internal static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new Form1());
+
+
+        // ========================================================
+        // INSTALAR / ACTUALIZAR MOD
+        // ========================================================
+
+        if (!ModInstaller.EnsureInstalled())
+        {
+            return;
+        }
+
+
+        // ========================================================
+        // ABRIR TASKBAR HERO
+        // ========================================================
+
+        ModInstaller.LaunchGameIfNeeded();
+
+
+        // ========================================================
+        // ABRIR MOD MENU
+        // ========================================================
+
+        Application.Run(
+            new Form1()
+        );
     }
 }

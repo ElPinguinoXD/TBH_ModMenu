@@ -137,3 +137,16 @@ moneymultiplier.txt
 *.old
 *.user
 *.suo
+
+# ==========================================================
+# RELEASE / INSTALADOR GENERADO
+# ==========================================================
+
+Release/
+InstallerPayload/
+
+TBHModMenu/Payload.zip
+
+# Publicaciones .NET
+**/bin/
+**/obj/
