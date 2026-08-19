@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Collections.Generic;
 
 namespace TBHModMenu;
 
@@ -72,6 +73,15 @@ private const int HTCAPTION = 0x0002;
     private const string MoneyMultiplierFile =
         @"C:\TBH_ModMenu\moneymultiplier.txt";
 
+    private const string HeroRuntimeStateFile =
+    @"C:\TBH_ModMenu\hero_runtime_state.txt";
+
+    private const string ResetCommandFile =
+        @"C:\TBH_ModMenu\reset_command.txt";
+
+    private const string HeroAnimationsDirectory =
+    @"C:\TBH_ModMenu\HeroAnimations";
+
     // ============================================================
     // PALETA MORADA
     // ============================================================
@@ -127,6 +137,18 @@ private const int HTCAPTION = 0x0002;
 
     private bool f1WasPressed;
 
+    private readonly Dictionary<int, HeroRuntimeState>
+    heroRuntimeStates =
+        new Dictionary<int, HeroRuntimeState>();
+
+    private DateTime lastHeroRuntimeStateRead =
+        DateTime.MinValue;
+
+    private const int HeroRuntimeStateRefreshMs =
+        250;
+
+    private bool heroRuntimeStateLoaded =
+        false;
     // ============================================================
     // UI
     // ============================================================
@@ -153,6 +175,39 @@ private const int HTCAPTION = 0x0002;
 
     private readonly Label resultLabel;
 
+    private FlowLayoutPanel heroVisualPanel = null!;
+    private readonly Dictionary<int, Panel> heroVisualCards = new();
+    private readonly Dictionary<int, PictureBox> heroVisualPictures = new();
+    private readonly Dictionary<int, Label> heroVisualLabels = new();
+
+    private int selectedHeroKeyVisual = 201;
+
+    // ============================================================
+    // HERO VISUAL ANIMATIONS
+    // ============================================================
+
+    private readonly Dictionary<int, List<Image>>
+        heroAnimationFrames =
+            new Dictionary<int, List<Image>>();
+
+
+    private System.Windows.Forms.Timer? heroAnimationTimer;
+
+
+    private int heroAnimationFrameIndex =
+        0;
+
+
+    private bool heroAnimationsLoaded =
+        false;
+
+
+    private DateTime lastHeroAnimationLoadAttempt =
+        DateTime.MinValue;
+
+
+    private const int HeroAnimationLoadRetryMs =
+        500;
     
     // ============================================================
     // CONSTRUCTOR
@@ -514,33 +569,135 @@ private const int HTCAPTION = 0x0002;
         heroCard.Controls.Add(heroTitle);
 
         // ========================================================
-        // PERSONAJE
+        // HERO VISUAL SELECTOR
+        //
+        // El ComboBox continúa existiendo internamente porque
+        // toda la lógica Apply/Reset ya funciona con él.
+        //
+        // Pero visualmente queda oculto.
         // ========================================================
 
-        var heroLabel = new Label
-        {
-            Text =
-                "Personaje",
+        heroComboBox =
+            new ComboBox
+            {
+                DropDownStyle =
+                    ComboBoxStyle.DropDownList,
 
-            ForeColor =
-                secondaryTextColor,
+                Visible =
+                    false,
 
-            Font =
-                new Font(
-                    "Segoe UI",
-                    8
-                ),
+                Width =
+                    1,
 
-            AutoSize = true,
+                Height =
+                    1,
 
-            Location =
-                new Point(
-                    16,
-                    43
+                Location =
+                    new Point(
+                        -500,
+                        -500
+                    )
+            };
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Caballero",
+                101
+            )
+        );
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Explorador",
+                201
+            )
+        );
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Hechicero",
+                301
+            )
+        );
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Sacerdote",
+                401
+            )
+        );
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Cazador",
+                501
+            )
+        );
+
+
+        heroComboBox.Items.Add(
+            new HeroOption(
+                "Asesino",
+                601
+            )
+        );
+
+
+        heroComboBox.SelectedIndexChanged +=
+            (_, _) =>
+            {
+                if (
+                    heroComboBox.SelectedItem
+                    is HeroOption hero
                 )
-        };
+                {
+                    selectedHeroKeyVisual =
+                        hero.HeroKey;
 
-        heroCard.Controls.Add(heroLabel);
+
+                    UpdateHeroVisualSelection();
+                }
+
+
+                LoadSelectedHeroRuntimeValues();
+            };
+
+
+        // Explorador por defecto.
+
+        heroComboBox.SelectedIndex =
+            1;
+
+
+        heroCard.Controls.Add(
+            heroComboBox
+        );
+
+
+        // ========================================================
+        // SELECTOR VISUAL ANIMADO
+        // ========================================================
+
+        BuildHeroVisualSelector(
+            heroCard,
+            16,
+            42,
+            318
+        );
+
+
+        UpdateHeroVisualSelection();
+
+
+        // Puede que Taskbar Hero ya haya exportado los frames.
+        // Si todavía no, UpdateOverlay reintentará después.
+
+        TryLoadHeroAnimations();
 
         heroComboBox =
             new ComboBox
@@ -613,6 +770,12 @@ private const int HTCAPTION = 0x0002;
                 601
             )
         );
+
+        heroComboBox.SelectedIndexChanged +=
+        (_, _) =>
+        {
+            LoadSelectedHeroRuntimeValues();
+        };
 
         heroComboBox.SelectedIndex = 1;
 
@@ -870,6 +1033,43 @@ private const int HTCAPTION = 0x0002;
 
         heroCard.Controls.Add(
             godModeCheckBox
+        );
+
+        // ========================================================
+        // RESET PERSONAJE
+        // ========================================================
+
+        Button resetHeroButton =
+            CreatePurpleButton(
+                "RESTABLECER PJ",
+                188,
+                284,
+                146
+            );
+
+
+        resetHeroButton.BackColor =
+            Color.FromArgb(
+                76,
+                57,
+                92
+            );
+
+
+        resetHeroButton.FlatAppearance.MouseOverBackColor =
+            Color.FromArgb(
+                98,
+                72,
+                120
+            );
+
+
+        resetHeroButton.Click +=
+            ResetSelectedHero;
+
+
+        heroCard.Controls.Add(
+            resetHeroButton
         );
 
         // ========================================================
@@ -1487,6 +1687,757 @@ private const int HTCAPTION = 0x0002;
     }
 
     // ============================================================
+    // BUILD HERO VISUAL SELECTOR
+    // ============================================================
+
+    private void BuildHeroVisualSelector(
+        Control parent,
+        int x,
+        int y,
+        int width
+    )
+    {
+        heroVisualPanel =
+            new FlowLayoutPanel
+            {
+                Location =
+                    new Point(
+                        x,
+                        y
+                    ),
+
+                Size =
+                    new Size(
+                        width,
+                        54
+                    ),
+
+                FlowDirection =
+                    FlowDirection.LeftToRight,
+
+                WrapContents =
+                    false,
+
+                AutoScroll =
+                    false,
+
+                Padding =
+                    new Padding(0),
+
+                Margin =
+                    new Padding(0),
+
+                BackColor =
+                    Color.Transparent
+            };
+
+
+        parent.Controls.Add(
+            heroVisualPanel
+        );
+
+
+        AddHeroVisualCard(
+            101,
+            "Caballero"
+        );
+
+
+        AddHeroVisualCard(
+            201,
+            "Explorador"
+        );
+
+
+        AddHeroVisualCard(
+            301,
+            "Hechicero"
+        );
+
+
+        AddHeroVisualCard(
+            401,
+            "Sacerdote"
+        );
+
+
+        AddHeroVisualCard(
+            501,
+            "Cazador"
+        );
+
+
+        AddHeroVisualCard(
+            601,
+            "Asesino"
+        );
+    }
+
+    // ============================================================
+    // ADD HERO VISUAL CARD
+    // ============================================================
+
+    private void AddHeroVisualCard(
+        int heroKey,
+        string heroName
+    )
+    {
+        Panel card =
+            new Panel
+            {
+                Width =
+                    49,
+
+                Height =
+                    52,
+
+                Margin =
+                    new Padding(
+                        2,
+                        0,
+                        2,
+                        0
+                    ),
+
+                BackColor =
+                    inputColor,
+
+                Cursor =
+                    Cursors.Hand,
+
+                Tag =
+                    heroKey
+            };
+
+
+        PictureBox picture =
+            new PictureBox
+            {
+                Location =
+                    new Point(
+                        3,
+                        3
+                    ),
+
+                Size =
+                    new Size(
+                        43,
+                        43
+                    ),
+
+                SizeMode =
+                    PictureBoxSizeMode.Zoom,
+
+                BackColor =
+                    Color.Transparent,
+
+                Cursor =
+                    Cursors.Hand,
+
+                Tag =
+                    heroKey
+            };
+
+
+        // ========================================================
+        // BORDER
+        // ========================================================
+
+        card.Paint +=
+            (_, e) =>
+            {
+                bool selected =
+                    heroKey ==
+                    selectedHeroKeyVisual;
+
+
+                Color border =
+                    selected
+                        ? accentHoverColor
+                        : cardBorderColor;
+
+
+                int thickness =
+                    selected
+                        ? 2
+                        : 1;
+
+
+                using Pen pen =
+                    new Pen(
+                        border,
+                        thickness
+                    );
+
+
+                e.Graphics.DrawRectangle(
+                    pen,
+                    1,
+                    1,
+                    card.Width - 3,
+                    card.Height - 3
+                );
+
+
+                // Línea morada inferior del seleccionado.
+
+                if (selected)
+                {
+                    using Brush brush =
+                        new SolidBrush(
+                            accentColor
+                        );
+
+
+                    e.Graphics.FillRectangle(
+                        brush,
+                        4,
+                        card.Height - 5,
+                        card.Width - 8,
+                        3
+                    );
+                }
+            };
+
+
+        void SelectThisHero(
+            object? sender,
+            EventArgs e
+        )
+        {
+            SelectHeroByKey(
+                heroKey
+            );
+        }
+
+
+        card.Click +=
+            SelectThisHero;
+
+
+        picture.Click +=
+            SelectThisHero;
+
+
+        card.Controls.Add(
+            picture
+        );
+
+
+        heroVisualPanel.Controls.Add(
+            card
+        );
+
+
+        heroVisualCards[
+            heroKey
+        ] =
+            card;
+
+
+        heroVisualPictures[
+            heroKey
+        ] =
+            picture;
+    }
+
+    // ============================================================
+    // SELECT HERO BY VISUAL CARD
+    // ============================================================
+
+    private void SelectHeroByKey(
+        int heroKey
+    )
+    {
+        try
+        {
+            for (
+                int i = 0;
+                i < heroComboBox.Items.Count;
+                i++
+            )
+            {
+                if (
+                    heroComboBox.Items[i]
+                    is HeroOption hero &&
+                    hero.HeroKey == heroKey
+                )
+                {
+                    heroComboBox.SelectedIndex =
+                        i;
+
+
+                    selectedHeroKeyVisual =
+                        heroKey;
+
+
+                    UpdateHeroVisualSelection();
+
+
+                    SetResult(
+                        $"{hero.Name} seleccionado",
+                        true
+                    );
+
+
+                    return;
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    // ============================================================
+    // UPDATE HERO VISUAL SELECTION
+    // ============================================================
+
+    private void UpdateHeroVisualSelection()
+    {
+        foreach (
+            KeyValuePair<int, Panel> pair
+            in heroVisualCards
+        )
+        {
+            bool selected =
+                pair.Key ==
+                selectedHeroKeyVisual;
+
+
+            pair.Value.BackColor =
+                selected
+                    ? Color.FromArgb(
+                        48,
+                        31,
+                        68
+                    )
+                    : inputColor;
+
+
+            pair.Value.Invalidate();
+        }
+    }
+
+    // ============================================================
+    // LOAD HERO ANIMATIONS
+    // ============================================================
+
+    private void TryLoadHeroAnimations()
+    {
+        if (heroAnimationsLoaded)
+        {
+            return;
+        }
+
+
+        if (
+            (
+                DateTime.UtcNow -
+                lastHeroAnimationLoadAttempt
+            ).TotalMilliseconds
+            <
+            HeroAnimationLoadRetryMs
+        )
+        {
+            return;
+        }
+
+
+        lastHeroAnimationLoadAttempt =
+            DateTime.UtcNow;
+
+
+        try
+        {
+            int[] heroIds =
+            {
+                101,
+                201,
+                301,
+                401,
+                501,
+                601
+            };
+
+
+            foreach (
+                int heroId
+                in heroIds
+            )
+            {
+                // Ya lo cargamos.
+
+                if (
+                    heroAnimationFrames.ContainsKey(
+                        heroId
+                    )
+                )
+                {
+                    continue;
+                }
+
+
+                string heroDirectory =
+                    Path.Combine(
+                        HeroAnimationsDirectory,
+                        heroId.ToString()
+                    );
+
+
+                if (
+                    !Directory.Exists(
+                        heroDirectory
+                    )
+                )
+                {
+                    continue;
+                }
+
+
+                string[] files =
+                    Directory.GetFiles(
+                        heroDirectory,
+                        "*.png"
+                    );
+
+
+                if (files.Length == 0)
+                {
+                    continue;
+                }
+
+
+                Array.Sort(
+                    files,
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+
+                List<Image> frames =
+                    new List<Image>();
+
+
+                foreach (
+                    string path
+                    in files
+                )
+                {
+                    Image? frame =
+                        LoadImageWithoutLock(
+                            path
+                        );
+
+
+                    if (frame != null)
+                    {
+                        frames.Add(
+                            frame
+                        );
+                    }
+                }
+
+
+                if (frames.Count > 0)
+                {
+                    heroAnimationFrames[
+                        heroId
+                    ] =
+                        frames;
+                }
+            }
+
+
+            // Esperamos hasta tener los seis personajes.
+
+            if (
+                heroAnimationFrames.Count < 6
+            )
+            {
+                return;
+            }
+
+
+            heroAnimationsLoaded =
+                true;
+
+
+            StartHeroAnimationTimer();
+
+
+            AdvanceHeroAnimations();
+        }
+        catch
+        {
+        }
+    }
+
+    // ============================================================
+    // LOAD IMAGE WITHOUT LOCKING PNG FILE
+    // ============================================================
+
+    private Image? LoadImageWithoutLock(
+        string path
+    )
+    {
+        try
+        {
+            byte[] data =
+                File.ReadAllBytes(
+                    path
+                );
+
+
+            using MemoryStream stream =
+                new MemoryStream(
+                    data
+                );
+
+
+            using Image source =
+                Image.FromStream(
+                    stream
+                );
+
+
+            return new Bitmap(
+                source
+            );
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // ============================================================
+    // READ HERO ANIMATION INTERVAL
+    // ============================================================
+
+    private int ReadHeroAnimationInterval()
+    {
+        const int fallback =
+            167;
+
+
+        try
+        {
+            string metadataPath =
+                Path.Combine(
+                    HeroAnimationsDirectory,
+                    "201",
+                    "animation.txt"
+                );
+
+
+            if (
+                !File.Exists(
+                    metadataPath
+                )
+            )
+            {
+                return fallback;
+            }
+
+
+            float duration =
+                1.0f;
+
+
+            float speed =
+                1.0f;
+
+
+            int frames =
+                6;
+
+
+            foreach (
+                string rawLine
+                in File.ReadAllLines(
+                    metadataPath
+                )
+            )
+            {
+                string[] parts =
+                    rawLine.Split(
+                        '=',
+                        2
+                    );
+
+
+                if (parts.Length != 2)
+                {
+                    continue;
+                }
+
+
+                string key =
+                    parts[0].Trim();
+
+
+                string value =
+                    parts[1].Trim();
+
+
+                if (
+                    key.Equals(
+                        "duration",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    float.TryParse(
+                        value,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out duration
+                    );
+                }
+
+
+                if (
+                    key.Equals(
+                        "speed",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    float.TryParse(
+                        value,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out speed
+                    );
+                }
+
+
+                if (
+                    key.Equals(
+                        "frames",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    int.TryParse(
+                        value,
+                        out frames
+                    );
+                }
+            }
+
+
+            if (
+                duration <= 0f ||
+                speed <= 0f ||
+                frames <= 0
+            )
+            {
+                return fallback;
+            }
+
+
+            double milliseconds =
+                (
+                    duration /
+                    frames /
+                    speed
+                )
+                *
+                1000.0;
+
+
+            return Math.Clamp(
+                (int)Math.Round(
+                    milliseconds
+                ),
+                50,
+                500
+            );
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    // ============================================================
+    // START HERO ANIMATION TIMER
+    // ============================================================
+
+    private void StartHeroAnimationTimer()
+    {
+        if (heroAnimationTimer != null)
+        {
+            return;
+        }
+
+
+        heroAnimationTimer =
+            new System.Windows.Forms.Timer
+            {
+                Interval =
+                    ReadHeroAnimationInterval()
+            };
+
+
+        heroAnimationTimer.Tick +=
+            (_, _) =>
+            {
+                AdvanceHeroAnimations();
+            };
+
+
+        heroAnimationTimer.Start();
+    }
+
+    // ============================================================
+    // ADVANCE HERO ANIMATIONS
+    // ============================================================
+
+    private void AdvanceHeroAnimations()
+    {
+        if (!heroAnimationsLoaded)
+        {
+            return;
+        }
+
+
+        foreach (
+            KeyValuePair<int, PictureBox> pair
+            in heroVisualPictures
+        )
+        {
+            if (
+                !heroAnimationFrames.TryGetValue(
+                    pair.Key,
+                    out List<Image>? frames
+                ) ||
+                frames == null ||
+                frames.Count == 0
+            )
+            {
+                continue;
+            }
+
+
+            int frameIndex =
+                heroAnimationFrameIndex
+                %
+                frames.Count;
+
+
+            pair.Value.Image =
+                frames[
+                    frameIndex
+                ];
+        }
+
+
+        heroAnimationFrameIndex++;
+    }
+
+    // ============================================================
     // APPLY LEVEL
     // ============================================================
 
@@ -1677,6 +2628,104 @@ private const int HTCAPTION = 0x0002;
         }
     }
 
+    // ============================================================
+    // RESET SELECTED HERO
+    // ============================================================
+
+    private void ResetSelectedHero(
+        object? sender,
+        EventArgs e
+    )
+    {
+        try
+        {
+            if (
+                !TryGetSelectedHero(
+                    out HeroOption? hero
+                ) ||
+                hero == null
+            )
+            {
+                return;
+            }
+
+
+            // ========================================================
+            // ENVIAR COMANDO AL PLUGIN
+            //
+            // hero|201|timestamp
+            // ========================================================
+
+            string command =
+                $"hero|" +
+                $"{hero.HeroKey}|" +
+                $"{DateTime.UtcNow.Ticks}";
+
+
+            File.WriteAllText(
+                ResetCommandFile,
+                command
+            );
+
+
+            SetResult(
+                $"{hero.Name} • Restaurando valores reales...",
+                true
+            );
+
+
+            // ========================================================
+            // ESPERAR A QUE TBHPLUGIN PROCESE EL RESET
+            //
+            // Plugin revisa reset_command y después actualiza
+            // hero_runtime_state.txt.
+            // ========================================================
+
+            System.Windows.Forms.Timer refreshTimer =
+                new System.Windows.Forms.Timer
+                {
+                    Interval =
+                        750
+                };
+
+
+            refreshTimer.Tick +=
+                (_, _) =>
+                {
+                    refreshTimer.Stop();
+
+                    refreshTimer.Dispose();
+
+
+                    // Forzar que el lector permita una nueva lectura.
+
+                    lastHeroRuntimeStateRead =
+                        DateTime.MinValue;
+
+
+                    UpdateHeroRuntimeState();
+
+
+                    LoadSelectedHeroRuntimeValues();
+
+
+                    SetResult(
+                        $"{hero.Name} • Valores restaurados",
+                        true
+                    );
+                };
+
+
+            refreshTimer.Start();
+        }
+        catch (Exception ex)
+        {
+            SetResult(
+                $"Error reset: {ex.Message}",
+                false
+            );
+        }
+    }
     // ============================================================
     // APPLY MONEY MULTIPLIER
     // ============================================================
@@ -2051,7 +3100,8 @@ private const int HTCAPTION = 0x0002;
     )
     {
         DetectGame();
-
+        UpdateHeroRuntimeState();
+        TryLoadHeroAnimations();
         bool f1Pressed =
             (
                 GetAsyncKeyState(
@@ -2153,7 +3203,7 @@ private const int HTCAPTION = 0x0002;
     // CLOSE
     // ============================================================
 
-    protected override void OnFormClosing(
+   protected override void OnFormClosing(
         FormClosingEventArgs e
     )
     {
@@ -2161,9 +3211,444 @@ private const int HTCAPTION = 0x0002;
 
         updateTimer.Dispose();
 
+
+        if (heroAnimationTimer != null)
+        {
+            heroAnimationTimer.Stop();
+
+            heroAnimationTimer.Dispose();
+
+            heroAnimationTimer =
+                null;
+        }
+
+
+        foreach (
+            KeyValuePair<int, List<Image>> pair
+            in heroAnimationFrames
+        )
+        {
+            foreach (
+                Image image
+                in pair.Value
+            )
+            {
+                image.Dispose();
+            }
+        }
+
+
+        heroAnimationFrames.Clear();
+
+
         gameProcess?.Dispose();
 
-        base.OnFormClosing(e);
+
+        base.OnFormClosing(
+            e
+        );
+    }
+
+    // ============================================================
+    // READ HERO RUNTIME STATE
+    // ============================================================
+
+    private void UpdateHeroRuntimeState()
+    {
+        try
+        {
+            if (
+                (
+                    DateTime.UtcNow -
+                    lastHeroRuntimeStateRead
+                ).TotalMilliseconds
+                <
+                HeroRuntimeStateRefreshMs
+            )
+            {
+                return;
+            }
+
+
+            lastHeroRuntimeStateRead =
+                DateTime.UtcNow;
+
+
+            if (!File.Exists(HeroRuntimeStateFile))
+            {
+                return;
+            }
+
+
+            string[] lines =
+                File.ReadAllLines(
+                    HeroRuntimeStateFile
+                );
+
+
+            if (lines.Length <= 1)
+            {
+                return;
+            }
+
+
+            Dictionary<int, HeroRuntimeState>
+                newStates =
+                    new Dictionary<int, HeroRuntimeState>();
+
+
+            foreach (string rawLine in lines)
+            {
+                string line =
+                    rawLine.Trim();
+
+
+                if (
+                    string.IsNullOrWhiteSpace(line) ||
+                    line.StartsWith("#")
+                )
+                {
+                    continue;
+                }
+
+
+                string[] parts =
+                    line.Split('|');
+
+
+                // Formato actual:
+                //
+                // 0 HeroId
+                // 1 Level
+                // 2 OriginalLevel
+                // 3 Unlocked
+                // 4 OriginalDamage
+                // 5 DamageOverride
+                // 6 RealAttackSpeed
+                // 7 AttackOverride
+                // 8 RealMovementSpeed
+                // 9 MovementOverride
+
+                if (parts.Length < 10)
+                {
+                    continue;
+                }
+
+
+                if (
+                    !int.TryParse(
+                        parts[0],
+                        out int heroId
+                    )
+                )
+                {
+                    continue;
+                }
+
+
+                int.TryParse(
+                    parts[1],
+                    out int level
+                );
+
+
+                int.TryParse(
+                    parts[2],
+                    out int originalLevel
+                );
+
+
+                bool unlocked =
+                    parts[3] == "1";
+
+
+                HeroRuntimeState state =
+                    new HeroRuntimeState
+                    {
+                        HeroId =
+                            heroId,
+
+                        Level =
+                            level,
+
+                        OriginalLevel =
+                            originalLevel,
+
+                        Unlocked =
+                            unlocked,
+
+                        OriginalDamage =
+                            ParseRuntimeDecimal(
+                                parts[4]
+                            ),
+
+                        DamageOverride =
+                            ParseRuntimeDecimal(
+                                parts[5]
+                            ),
+
+                        RealAttackSpeed =
+                            ParseRuntimeDecimal(
+                                parts[6]
+                            ),
+
+                        AttackOverride =
+                            ParseRuntimeDecimal(
+                                parts[7]
+                            ),
+
+                        RealMovementSpeed =
+                            ParseRuntimeDecimal(
+                                parts[8]
+                            ),
+
+                        MovementOverride =
+                            ParseRuntimeDecimal(
+                                parts[9]
+                            )
+                    };
+
+
+                newStates[
+                    heroId
+                ] =
+                    state;
+            }
+
+
+            if (newStates.Count == 0)
+            {
+                return;
+            }
+
+
+            bool firstLoad =
+                !heroRuntimeStateLoaded;
+
+
+            heroRuntimeStates.Clear();
+
+
+            foreach (
+                KeyValuePair<int, HeroRuntimeState> pair
+                in newStates
+            )
+            {
+                heroRuntimeStates[
+                    pair.Key
+                ] =
+                    pair.Value;
+            }
+
+
+            heroRuntimeStateLoaded =
+                true;
+
+
+            // En el primer estado válido cargamos también
+            // el personaje que está seleccionado actualmente.
+
+            if (firstLoad)
+            {
+                LoadSelectedHeroRuntimeValues();
+            }
+        }
+        catch
+        {
+            // El plugin puede estar reemplazando el archivo
+            // justo mientras Form1 intenta leerlo.
+            //
+            // Simplemente esperamos el próximo tick.
+        }
+    }
+
+    private decimal? ParseRuntimeDecimal(
+        string text
+    )
+    {
+        if (
+            string.IsNullOrWhiteSpace(text) ||
+            string.Equals(
+                text,
+                "NA",
+                StringComparison.OrdinalIgnoreCase
+            ) ||
+            string.Equals(
+                text,
+                "OFF",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return null;
+        }
+
+
+        if (
+            decimal.TryParse(
+                text,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out decimal value
+            )
+        )
+        {
+            return value;
+        }
+
+
+        return null;
+    }
+
+    private void LoadSelectedHeroRuntimeValues()
+    {
+        try
+        {
+            if (
+                !TryGetSelectedHero(
+                    out HeroOption? hero
+                ) ||
+                hero == null
+            )
+            {
+                return;
+            }
+
+
+            if (
+                !heroRuntimeStates.TryGetValue(
+                    hero.HeroKey,
+                    out HeroRuntimeState? state
+                ) ||
+                state == null
+            )
+            {
+                return;
+            }
+
+
+            // ========================================================
+            // LEVEL
+            // ========================================================
+
+            SetNumericValueSafe(
+                heroLevelInput,
+                state.Level
+            );
+
+
+            // ========================================================
+            // DAMAGE
+            //
+            // Si existe override mostramos ese.
+            // Si no, mostramos el valor real/original.
+            // ========================================================
+
+            decimal? damageValue =
+                state.DamageOverride ??
+                state.OriginalDamage;
+
+
+            if (damageValue.HasValue)
+            {
+                SetNumericValueSafe(
+                    damageInput,
+                    damageValue.Value
+                );
+            }
+
+
+            // ========================================================
+            // ATTACK SPEED
+            // ========================================================
+
+            decimal? attackValue =
+                state.AttackOverride ??
+                state.RealAttackSpeed;
+
+
+            if (attackValue.HasValue)
+            {
+                SetNumericValueSafe(
+                    attackSpeedInput,
+                    attackValue.Value
+                );
+            }
+
+
+            // ========================================================
+            // MOVEMENT
+            // ========================================================
+
+            decimal? movementValue =
+                state.MovementOverride ??
+                state.RealMovementSpeed;
+
+
+            if (movementValue.HasValue)
+            {
+                SetNumericValueSafe(
+                    movementSpeedInput,
+                    movementValue.Value
+                );
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void SetNumericValueSafe(
+        NumericUpDown input,
+        decimal value
+    )
+    {
+        if (value < input.Minimum)
+        {
+            value =
+                input.Minimum;
+        }
+
+
+        if (value > input.Maximum)
+        {
+            value =
+                input.Maximum;
+        }
+
+
+        input.Value =
+            value;
+    }
+
+    // ============================================================
+    // HERO RUNTIME STATE
+    // ============================================================
+
+    private sealed class HeroRuntimeState
+    {
+        public int HeroId { get; set; }
+
+        public int Level { get; set; }
+
+        public int OriginalLevel { get; set; }
+
+        public bool Unlocked { get; set; }
+
+
+        public decimal? OriginalDamage { get; set; }
+
+        public decimal? DamageOverride { get; set; }
+
+
+        public decimal? RealAttackSpeed { get; set; }
+
+        public decimal? AttackOverride { get; set; }
+
+
+        public decimal? RealMovementSpeed { get; set; }
+
+        public decimal? MovementOverride { get; set; }
     }
 
     // ============================================================

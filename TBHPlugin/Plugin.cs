@@ -14,6 +14,7 @@ using UnityEngine;
 using TaskbarHero;
 using TaskbarHero.EasySaveData;
 
+using System.Linq;
 using System.Reflection;
 
 namespace TBHPlugin;
@@ -113,82 +114,184 @@ internal static class ModState
     public static bool GodModeEnabled = false;
 
     // ================================================================
-    // ATTACK DAMAGE OVERRIDE
+    // ATTACK SPEED - PER HERO
     // ================================================================
 
-    public static bool AttackDamageEnabled = true;
-
-    public static float AttackDamage = 50f;
-
-
-    // ================================================================
-    // ATTACK SPEED
-    // ================================================================
-
-    public static bool AttackSpeedEnabled = false;
-
-    public static float AttackSpeed = 1.56f;
-
-    public static int AttackSpeedHeroId = -1;
-
-    public static int AttackSpeedHeroInstanceId = int.MinValue;
-
-
-    // ================================================================
-    // MOVEMENT SPEED
-    // ================================================================
-
-    public static bool MovementSpeedEnabled = false;
-
-    public static float MovementSpeed = 8.5f;
-
-    public static int MovementSpeedHeroId = -1;
-
-    public static int MovementSpeedHeroInstanceId = int.MinValue;
-
-    // ================================================================
-    // MOVEMENT SPEED POR HERO
-    // ================================================================
+    // HeroId -> velocidad que el MOD está imponiendo.
+    // Si un HeroId no existe aquí, el juego conserva su valor real.
 
     public static readonly Dictionary<int, float>
-        MovementSpeedByHero =
+        AttackSpeedOverrides =
             new Dictionary<int, float>();
 
+
+    // HeroId -> valor REAL calculado por el juego antes del Postfix.
+
     public static readonly Dictionary<int, float>
-        MovementSpeedByInstance =
+        RealAttackSpeedByHero =
             new Dictionary<int, float>();
+
+
+    // ================================================================
+    // MOVEMENT SPEED - PER HERO
+    // ================================================================
+
+    // HeroId -> velocidad que el MOD está imponiendo.
+    // Este diccionario también es la fuente del LateUpdate físico.
+
+    public static readonly Dictionary<int, float>
+        MovementSpeedOverrides =
+            new Dictionary<int, float>();
+
+
+    // HeroId -> valor REAL calculado por el juego antes del Postfix.
+
+    public static readonly Dictionary<int, float>
+        RealMovementSpeedByHero =
+            new Dictionary<int, float>();
+
+    // ================================================================
+    // ORIGINAL LEVEL - SESSION SNAPSHOT
+    //
+    // Nivel que tenía el héroe cuando esta sesión del mod consiguió
+    // leer el save por primera vez.
+    // ================================================================
 
     public static readonly Dictionary<int, int>
-        MovementInstanceByHero =
+        OriginalLevelByHero =
             new Dictionary<int, int>();
 
+    public static readonly Dictionary<int, int>
+        OriginalAbilityPointsByHero =
+            new Dictionary<int, int>();
     // ================================================================
-    // ATTACK DAMAGE HELPER
+    // RUNTIME HERO MAP
     //
-    // AttackSpeed y MovementSpeed se aplican directamente sobre
-    // Hero.bsqu y Unit.bsrq para no afectar a otros héroes.
+    // InstanceID de Unity -> HeroId de Taskbar Hero
     // ================================================================
 
-    public static void ApplyAttackDamage(
-        StatType stat,
-        ref float result
+    public static readonly Dictionary<int, int>
+        HeroIdByInstanceId =
+            new Dictionary<int, int>();
+
+
+    public static bool TryGetHeroId(
+        UnityEngine.Object instance,
+        out int heroId
     )
     {
-        if (!AttackDamageEnabled)
-            return;
+        heroId =
+            -1;
 
-        if (stat != StatType.AttackDamage)
-            return;
 
-        result = AttackDamage;
+        if (instance == null)
+        {
+            return false;
+        }
+
+
+        // ============================================================
+        // PRIMERA OPCIÓN: IDENTIDAD DIRECTA DEL HERO
+        //
+        // Hero posee su propio "cache" (vh). Ese cache hereda de vo,
+        // donde btet representa el HeroKey runtime.
+        //
+        // Esto es mucho más estable que decidir el héroe únicamente
+        // por GetInstanceID(), especialmente cuando Taskbar Hero
+        // reconstruye/reutiliza objetos al cambiar personajes.
+        // ============================================================
+
+        try
+        {
+            Hero hero =
+                instance as Hero;
+
+
+            if (
+                hero != null &&
+                hero.cache != null
+            )
+            {
+                int runtimeHeroId =
+                    hero.cache.btet;
+
+
+                if (runtimeHeroId > 0)
+                {
+                    heroId =
+                        runtimeHeroId;
+
+                    return true;
+                }
+
+
+                // Fallback adicional usando HeroInfoData.
+
+                try
+                {
+                    if (
+                        hero.cache.bflj != null &&
+                        hero.cache.bflj.HeroKey > 0
+                    )
+                    {
+                        heroId =
+                            hero.cache.bflj.HeroKey;
+
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
+
+
+        // ============================================================
+        // FALLBACK: MAPA DE INSTANCE ID
+        // ============================================================
+
+        return HeroIdByInstanceId.TryGetValue(
+            instance.GetInstanceID(),
+            out heroId
+        );
     }
+
+    // ================================================================
+    // ATTACK DAMAGE - PER HERO
+    // ================================================================
+
+    // HeroId -> daño que el MOD está imponiendo.
+    // Si el HeroId no está aquí, no alteramos su daño.
+
+    public static readonly Dictionary<int, float>
+        AttackDamageOverrides =
+            new Dictionary<int, float>();
+
+
+    // Valor REAL más reciente calculado por el juego.
+
+    public static readonly Dictionary<int, float>
+        RealDamageByHero =
+            new Dictionary<int, float>();
+
+
+    // Snapshot estable del daño cuando el mod
+    // consiguió leer ese héroe por primera vez.
+
+    public static readonly Dictionary<int, float>
+        OriginalDamageByHero =
+            new Dictionary<int, float>();
+
 
     // ================================================================
     // MONEY MULTIPLIER
     // ================================================================
 
     public static float MoneyMultiplier = 1.0f;
-
 }
 
 
@@ -216,6 +319,21 @@ public class SpeedController : MonoBehaviour
 
     private const string DamageCommandFile =
         @"C:\TBH_ModMenu\damage_command.txt";
+
+    private const string ResetCommandFile =
+        @"C:\TBH_ModMenu\reset_command.txt";
+
+
+    private string lastResetCommand =
+        "";
+
+
+    private float resetCommandTimer =
+        0f;
+
+
+    private const float ResetCommandInterval =
+        0.10f;
 
     private string lastDamageCommand = "";
 
@@ -246,6 +364,940 @@ public class SpeedController : MonoBehaviour
 
     private const float HeroSpeedTargetInterval = 0.50f;
 
+    private SpriteAnimation_Image GetPreviewAnimation(
+        SDModelPreview preview,
+        string memberName
+    )
+    {
+        if (preview == null)
+        {
+            return null;
+        }
+
+
+        try
+        {
+            Type type =
+                preview.GetType();
+
+
+            // ============================================================
+            // PRIMERO PROPIEDAD
+            //
+            // Il2CppInterop suele convertir fields IL2CPP
+            // en properties dentro del wrapper generado.
+            // ============================================================
+
+            var property =
+                type.GetProperty(
+                    memberName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic
+                );
+
+
+            if (property != null)
+            {
+                object value =
+                    property.GetValue(
+                        preview
+                    );
+
+
+                if (
+                    value is SpriteAnimation_Image animation
+                )
+                {
+                    return animation;
+                }
+            }
+
+
+            // ============================================================
+            // FALLBACK FIELD
+            // ============================================================
+
+            var field =
+                type.GetField(
+                    memberName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic
+                );
+
+
+            if (field != null)
+            {
+                object value =
+                    field.GetValue(
+                        preview
+                    );
+
+
+                if (
+                    value is SpriteAnimation_Image animation
+                )
+                {
+                    return animation;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] GetPreviewAnimation " +
+                $"{memberName} ERROR: {ex.Message}"
+            );
+        }
+
+
+        return null;
+    }
+
+    private bool ExportSpriteToPng(
+        Sprite sprite,
+        string outputPath
+    )
+    {
+        RenderTexture previousRenderTexture =
+            null;
+
+
+        RenderTexture renderTexture =
+            null;
+
+
+        Texture2D readableTexture =
+            null;
+
+
+        try
+        {
+            if (
+                sprite == null ||
+                sprite.texture == null
+            )
+            {
+                return false;
+            }
+
+
+            Texture2D sourceTexture =
+                sprite.texture;
+
+
+            Rect rect =
+                sprite.textureRect;
+
+
+            int width =
+                Mathf.RoundToInt(
+                    rect.width
+                );
+
+
+            int height =
+                Mathf.RoundToInt(
+                    rect.height
+                );
+
+
+            if (
+                width <= 0 ||
+                height <= 0
+            )
+            {
+                return false;
+            }
+
+
+            // ============================================================
+            // COPIAR TEXTURA GPU -> RENDERTEXTURE
+            //
+            // Esto funciona incluso cuando el Texture2D original
+            // no tiene Read/Write Enabled.
+            // ============================================================
+
+            renderTexture =
+                RenderTexture.GetTemporary(
+                    sourceTexture.width,
+                    sourceTexture.height,
+                    0,
+                    RenderTextureFormat.ARGB32,
+                    RenderTextureReadWrite.Default
+                );
+
+
+            Graphics.Blit(
+                sourceTexture,
+                renderTexture
+            );
+
+
+            previousRenderTexture =
+                RenderTexture.active;
+
+
+            RenderTexture.active =
+                renderTexture;
+
+
+            readableTexture =
+                new Texture2D(
+                    width,
+                    height,
+                    TextureFormat.RGBA32,
+                    false
+                );
+
+
+            readableTexture.ReadPixels(
+                new Rect(
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height
+                ),
+                0,
+                0,
+                false
+            );
+
+
+            readableTexture.Apply();
+
+
+            byte[] png =
+                ImageConversion.EncodeToPNG(
+                    readableTexture
+                );
+
+
+            if (
+                png == null ||
+                png.Length == 0
+            )
+            {
+                return false;
+            }
+
+
+            File.WriteAllBytes(
+                outputPath,
+                png
+            );
+
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] ExportSpriteToPng ERROR: " +
+                $"{ex.Message}"
+            );
+
+            return false;
+        }
+        finally
+        {
+            RenderTexture.active =
+                previousRenderTexture;
+
+
+            if (renderTexture != null)
+            {
+                RenderTexture.ReleaseTemporary(
+                    renderTexture
+                );
+            }
+
+
+            if (readableTexture != null)
+            {
+                UnityEngine.Object.Destroy(
+                    readableTexture
+                );
+            }
+        }
+    }
+
+    private bool ExportHeroAnimationFromPreview(
+        SDModelPreview preview,
+        int heroId,
+        string memberName
+    )
+    {
+        try
+        {
+            SpriteAnimation_Image animation =
+                GetPreviewAnimation(
+                    preview,
+                    memberName
+                );
+
+
+            if (animation == null)
+            {
+                Plugin.PluginLog?.LogWarning(
+                    $"[TBH] ANIMATION NULL | " +
+                    $"Hero={heroId} Field={memberName}"
+                );
+
+                return false;
+            }
+
+
+            // ============================================================
+            // SPRITES ORIGINALES
+            //
+            // AssetRipper:
+            // private List<Sprite> sprites;
+            //
+            // No dependemos del nombre obfuscado bsel del dump.
+            // ============================================================
+
+            object spriteCollection =
+                GetRuntimeMemberValue(
+                    animation,
+                    "sprites",
+                    "bsel"
+                );
+
+
+            if (spriteCollection == null)
+            {
+                Plugin.PluginLog?.LogWarning(
+                    $"[TBH] SPRITE COLLECTION NULL | " +
+                    $"Hero={heroId}"
+                );
+
+                return false;
+            }
+
+
+            int spriteCount =
+                GetRuntimeCollectionCount(
+                    spriteCollection
+                );
+
+
+            if (spriteCount <= 0)
+            {
+                Plugin.PluginLog?.LogWarning(
+                    $"[TBH] NO FRAMES | " +
+                    $"Hero={heroId}"
+                );
+
+                return false;
+            }
+
+
+            string heroDirectory =
+                Path.Combine(
+                    HeroAnimationsDirectory,
+                    heroId.ToString()
+                );
+
+
+            Directory.CreateDirectory(
+                heroDirectory
+            );
+
+
+            int exportedFrames =
+                0;
+
+
+            for (
+                int i = 0;
+                i < spriteCount;
+                i++
+            )
+            {
+                object spriteObject =
+                    GetRuntimeCollectionItem(
+                        spriteCollection,
+                        i
+                    );
+
+
+                Sprite sprite =
+                    spriteObject as Sprite;
+
+
+                if (sprite == null)
+                {
+                    continue;
+                }
+
+
+                string framePath =
+                    Path.Combine(
+                        heroDirectory,
+                        $"{i:D3}.png"
+                    );
+
+
+                if (
+                    ExportSpriteToPng(
+                        sprite,
+                        framePath
+                    )
+                )
+                {
+                    exportedFrames++;
+                }
+            }
+
+
+            // ============================================================
+            // METADATA ORIGINAL
+            // ============================================================
+
+            float duration =
+                GetRuntimeFloat(
+                    animation,
+                    "duration",
+                    "bsem"
+                );
+
+
+            float speed =
+                GetRuntimeFloat(
+                    animation,
+                    "speed",
+                    "bsen"
+                );
+
+
+            bool loop =
+                GetRuntimeBool(
+                    animation,
+                    "loop",
+                    "bsep"
+                );
+
+
+            // ============================================================
+            // C# 10:
+            // NO meter ToString multilínea dentro de $"..."
+            // ============================================================
+
+            string durationText =
+                duration.ToString(
+                    CultureInfo.InvariantCulture
+                );
+
+
+            string speedText =
+                speed.ToString(
+                    CultureInfo.InvariantCulture
+                );
+
+
+            string metadata =
+                "hero=" +
+                heroId +
+                Environment.NewLine +
+
+                "frames=" +
+                exportedFrames +
+                Environment.NewLine +
+
+                "duration=" +
+                durationText +
+                Environment.NewLine +
+
+                "speed=" +
+                speedText +
+                Environment.NewLine +
+
+                "loop=" +
+                (loop ? "1" : "0");
+
+
+            File.WriteAllText(
+                Path.Combine(
+                    heroDirectory,
+                    "animation.txt"
+                ),
+                metadata
+            );
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] ANIMATION EXPORTED | " +
+                $"Hero={heroId} " +
+                $"Frames={exportedFrames} " +
+                $"Duration={duration} " +
+                $"Speed={speed} " +
+                $"Loop={loop}"
+            );
+
+
+            return exportedFrames > 0;
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] ExportHeroAnimation " +
+                $"Hero={heroId} ERROR: " +
+                $"{ex.Message}"
+            );
+
+
+            return false;
+        }
+    }
+
+    // ========================================================================
+    // HERO ANIMATION EXPORT
+    // ========================================================================
+
+    private void TryExportHeroAnimations()
+    {
+        if (heroAnimationsExported)
+        {
+            return;
+        }
+
+
+        heroAnimationExportTimer +=
+            Time.unscaledDeltaTime;
+
+
+        if (
+            heroAnimationExportTimer <
+            HeroAnimationExportRetryInterval
+        )
+        {
+            return;
+        }
+
+
+        heroAnimationExportTimer =
+            0f;
+
+
+        try
+        {
+            SDModelPreview[] previews =
+                UnityEngine.Object.FindObjectsOfType<
+                    SDModelPreview
+                >(
+                    true
+                );
+
+
+            if (
+                previews == null ||
+                previews.Length == 0
+            )
+            {
+                Plugin.PluginLog?.LogWarning(
+                    "[TBH] SDModelPreview todavía no disponible."
+                );
+
+                return;
+            }
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] SDModelPreview encontrados: " +
+                $"{previews.Length}"
+            );
+
+
+            SDModelPreview preview =
+                previews[0];
+
+
+            Directory.CreateDirectory(
+                HeroAnimationsDirectory
+            );
+
+
+            int exported =
+                0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    101,
+                    "m_spriteAnimationKnight"
+                )
+                ? 1
+                : 0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    201,
+                    "m_spriteAnimationRanger"
+                )
+                ? 1
+                : 0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    301,
+                    "m_spriteAnimationSorcerer"
+                )
+                ? 1
+                : 0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    401,
+                    "m_spriteAnimationPriest"
+                )
+                ? 1
+                : 0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    501,
+                    "m_spriteAnimationHunter"
+                )
+                ? 1
+                : 0;
+
+
+            exported +=
+                ExportHeroAnimationFromPreview(
+                    preview,
+                    601,
+                    "m_spriteAnimationSlayer"
+                )
+                ? 1
+                : 0;
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] HERO ANIMATION EXPORT -> " +
+                $"{exported}/6"
+            );
+
+
+            // No marcamos como terminado hasta tener los 6.
+            // Algunos objetos de UI pueden inicializarse después.
+
+            if (exported >= 6)
+            {
+                heroAnimationsExported =
+                    true;
+
+
+                Plugin.PluginLog?.LogInfo(
+                    "[TBH] ✓ ANIMACIONES DE HEROES EXPORTADAS"
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] TryExportHeroAnimations ERROR: " +
+                $"{ex.Message}"
+            );
+        }
+    }
+
+    private object GetRuntimeMemberValue(
+        object target,
+        params string[] names
+    )
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+
+        Type type =
+            target.GetType();
+
+
+        BindingFlags flags =
+            BindingFlags.Instance |
+            BindingFlags.Public |
+            BindingFlags.NonPublic;
+
+
+        foreach (string name in names)
+        {
+            try
+            {
+                PropertyInfo property =
+                    type.GetProperty(
+                        name,
+                        flags
+                    );
+
+
+                if (property != null)
+                {
+                    return property.GetValue(
+                        target
+                    );
+                }
+            }
+            catch
+            {
+            }
+
+
+            try
+            {
+                FieldInfo field =
+                    type.GetField(
+                        name,
+                        flags
+                    );
+
+
+                if (field != null)
+                {
+                    return field.GetValue(
+                        target
+                    );
+                }
+            }
+            catch
+            {
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private int GetRuntimeCollectionCount(
+        object collection
+    )
+    {
+        if (collection == null)
+        {
+            return 0;
+        }
+
+
+        try
+        {
+            PropertyInfo property =
+                collection.GetType().GetProperty(
+                    "Count",
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic
+                );
+
+
+            if (property == null)
+            {
+                return 0;
+            }
+
+
+            object value =
+                property.GetValue(
+                    collection
+                );
+
+
+            if (value == null)
+            {
+                return 0;
+            }
+
+
+            return Convert.ToInt32(
+                value
+            );
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+
+    private object GetRuntimeCollectionItem(
+        object collection,
+        int index
+    )
+    {
+        if (collection == null)
+        {
+            return null;
+        }
+
+
+        try
+        {
+            Type type =
+                collection.GetType();
+
+
+            PropertyInfo property =
+                type.GetProperty(
+                    "Item",
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic
+                );
+
+
+            if (property != null)
+            {
+                return property.GetValue(
+                    collection,
+                    new object[]
+                    {
+                        index
+                    }
+                );
+            }
+
+
+            MethodInfo method =
+                type.GetMethods(
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic
+                )
+                .FirstOrDefault(
+                    m =>
+                        m.Name == "get_Item" &&
+                        m.GetParameters().Length == 1
+                );
+
+
+            if (method != null)
+            {
+                return method.Invoke(
+                    collection,
+                    new object[]
+                    {
+                        index
+                    }
+                );
+            }
+        }
+        catch
+        {
+        }
+
+
+        return null;
+    }
+
+
+    private float GetRuntimeFloat(
+        object target,
+        params string[] names
+    )
+    {
+        try
+        {
+            object value =
+                GetRuntimeMemberValue(
+                    target,
+                    names
+                );
+
+
+            if (value == null)
+            {
+                return 0f;
+            }
+
+
+            return Convert.ToSingle(
+                value,
+                CultureInfo.InvariantCulture
+            );
+        }
+        catch
+        {
+            return 0f;
+        }
+    }
+
+
+    private bool GetRuntimeBool(
+        object target,
+        params string[] names
+    )
+    {
+        try
+        {
+            object value =
+                GetRuntimeMemberValue(
+                    target,
+                    names
+                );
+
+
+            if (value == null)
+            {
+                return false;
+            }
+
+
+            return Convert.ToBoolean(
+                value
+            );
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // ========================================================================
+    // HERO IDS
+    // ========================================================================
+
+    private static readonly int[] KnownHeroIds =
+    {
+        101,
+        201,
+        301,
+        401,
+        501,
+        601
+    };
+
+    // ========================================================================
+    // HERO RUNTIME STATE
+    // ========================================================================
+
+    private const string HeroRuntimeStateFile =
+        @"C:\TBH_ModMenu\hero_runtime_state.txt";
+
+
+    private float heroRuntimeStateTimer =
+        0f;
+
+
+    private const float HeroRuntimeStateInterval =
+        0.50f;
+
+
+    private bool heroRuntimeStateLogged =
+        false;
+
     private readonly Dictionary<int, Vector3>
         lastHeroPositions =
             new Dictionary<int, Vector3>();
@@ -271,6 +1323,65 @@ public class SpeedController : MonoBehaviour
 
     private const float MoneyMultiplierReadInterval = 0.10f;
 
+    private string ReadExistingCommand(
+        string path
+    )
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return "";
+            }
+
+
+            return File.ReadAllText(
+                path
+            ).Trim();
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+
+    private void InitializeCommandBaselines()
+    {
+        lastHeroCommand =
+            ReadExistingCommand(
+                HeroCommandFile
+            );
+
+
+        lastDamageCommand =
+            ReadExistingCommand(
+                DamageCommandFile
+            );
+
+
+        lastAttackSpeedCommand =
+            ReadExistingCommand(
+                AttackSpeedCommandFile
+            );
+
+
+        lastMovementSpeedCommand =
+            ReadExistingCommand(
+                MovementSpeedCommandFile
+            );
+        
+        lastResetCommand =
+            ReadExistingCommand(
+                ResetCommandFile
+            );
+
+
+        Plugin.PluginLog?.LogInfo(
+            "[TBH] Command baselines initialized."
+        );
+    }
+
     // ========================================================================
     // GAME SPEED
     // ========================================================================
@@ -280,15 +1391,6 @@ public class SpeedController : MonoBehaviour
     private float speedReadTimer = 0f;
 
     private const float SpeedReadInterval = 0.10f;
-
-
-    // ========================================================================
-    // ATTACK DAMAGE
-    // ========================================================================
-
-    private float damageReadTimer = 0f;
-
-    private const float DamageReadInterval = 0.10f;
 
 
     // ========================================================================
@@ -311,6 +1413,25 @@ public class SpeedController : MonoBehaviour
     private float heroDumpTimer = 0f;
 
     private const float HeroDumpRetryInterval = 2.0f;
+
+    // ========================================================================
+    // HERO ANIMATION EXPORT
+    // ========================================================================
+
+    private const string HeroAnimationsDirectory =
+        @"C:\TBH_ModMenu\HeroAnimations";
+
+
+    private bool heroAnimationsExported =
+        false;
+
+
+    private float heroAnimationExportTimer =
+        0f;
+
+
+    private const float HeroAnimationExportRetryInterval =
+        2.0f;
 
 
     // ========================================================================
@@ -335,10 +1456,17 @@ public class SpeedController : MonoBehaviour
                 ModDirectory
             );
 
-             // ------------------------------------------------------------
-            // GOD MODE
-            // ------------------------------------------------------------
 
+            // ============================================================
+            // IGNORAR COMANDOS DE LA SESIÓN ANTERIOR
+            // ============================================================
+
+            InitializeCommandBaselines();
+
+
+            // ============================================================
+            // GOD MODE
+            // ============================================================
 
             if (!File.Exists(GodModeFile))
             {
@@ -350,9 +1478,10 @@ public class SpeedController : MonoBehaviour
 
             ReadGodMode();
 
-            // ------------------------------------------------------------
+
+            // ============================================================
             // MONEY MULTIPLIER
-            // ------------------------------------------------------------
+            // ============================================================
 
             if (!File.Exists(MoneyMultiplierFile))
             {
@@ -363,9 +1492,11 @@ public class SpeedController : MonoBehaviour
             }
 
             ReadMoneyMultiplier();
-            // ------------------------------------------------------------
-            // SPEED FILE
-            // ------------------------------------------------------------
+
+
+            // ============================================================
+            // GAME SPEED
+            // ============================================================
 
             if (!File.Exists(SpeedFile))
             {
@@ -375,9 +1506,14 @@ public class SpeedController : MonoBehaviour
                 );
             }
 
-            // ------------------------------------------------------------
-            // DAMAGE FILE
-            // ------------------------------------------------------------
+
+            // ============================================================
+            // ARCHIVOS LEGACY QUE FORM1 TODAVÍA USA
+            //
+            // El plugin ya NO aplica daño leyendo attackdamage.txt.
+            // Damage se aplica únicamente mediante damage_command.txt
+            // y AttackDamageOverrides por HeroId.
+            // ============================================================
 
             if (!File.Exists(AttackDamageFile))
             {
@@ -387,9 +1523,6 @@ public class SpeedController : MonoBehaviour
                 );
             }
 
-            // ------------------------------------------------------------
-            // ATTACK SPEED / MOVEMENT SPEED FILES
-            // ------------------------------------------------------------
 
             if (!File.Exists(AttackSpeedFile))
             {
@@ -399,6 +1532,7 @@ public class SpeedController : MonoBehaviour
                 );
             }
 
+
             if (!File.Exists(MovementSpeedFile))
             {
                 File.WriteAllText(
@@ -407,13 +1541,12 @@ public class SpeedController : MonoBehaviour
                 );
             }
 
+
             ReadDesiredSpeed();
 
-            ReadDesiredAttackDamage();
 
             Plugin.PluginLog?.LogInfo(
-                $"[TBH] Attack Damage inicial: " +
-                $"{ModState.AttackDamage}"
+                "[TBH] SpeedController inicializado."
             );
         }
         catch (Exception ex)
@@ -437,17 +1570,21 @@ public class SpeedController : MonoBehaviour
 
         UpdateGameSpeed();
 
-        UpdateAttackDamage();
-
         UpdateHeroCommand();
 
         UpdateDamageCommand();
+
+        UpdateResetCommand();
 
         UpdateHeroSpeedCommands();
 
         UpdateHeroSpeedTargets();
 
         TryDumpHeroes();
+
+        TryExportHeroAnimations();
+
+        UpdateHeroRuntimeState();
 
         UpdateGodMode();
 
@@ -590,103 +1727,12 @@ public class SpeedController : MonoBehaviour
 
 
     // ========================================================================
-    // ATTACK DAMAGE OVERRIDE
+    // ATTACK DAMAGE
+    //
+    // El sistema global antiguo fue eliminado.
+    // Damage ahora se procesa exclusivamente por HeroId mediante
+    // UpdateDamageCommand() + ModState.AttackDamageOverrides.
     // ========================================================================
-
-    private void UpdateAttackDamage()
-    {
-        damageReadTimer +=
-            Time.unscaledDeltaTime;
-
-        if (
-            damageReadTimer <
-            DamageReadInterval
-        )
-        {
-            return;
-        }
-
-        damageReadTimer = 0f;
-
-        ReadDesiredAttackDamage();
-    }
-
-
-    private void ReadDesiredAttackDamage()
-    {
-        try
-        {
-            if (!File.Exists(AttackDamageFile))
-                return;
-
-            string text =
-                File.ReadAllText(
-                    AttackDamageFile
-                ).Trim();
-
-
-            // ------------------------------------------------------------
-            // "off" desactiva el override
-            // ------------------------------------------------------------
-
-            if (
-                string.Equals(
-                    text,
-                    "off",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                ModState.AttackDamageEnabled =
-                    false;
-
-                return;
-            }
-
-
-            // ------------------------------------------------------------
-            // LEER DAÑO
-            // ------------------------------------------------------------
-
-            if (
-                float.TryParse(
-                    text,
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out float damage
-                )
-            )
-            {
-                if (damage <= 0f)
-                {
-                    ModState.AttackDamageEnabled =
-                        false;
-
-                    return;
-                }
-
-                damage =
-                    Mathf.Clamp(
-                        damage,
-                        1f,
-                        1000000f
-                    );
-
-                ModState.AttackDamage =
-                    damage;
-
-                ModState.AttackDamageEnabled =
-                    true;
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.PluginLog?.LogWarning(
-                $"[TBH] Error leyendo attackdamage.txt: " +
-                $"{ex.Message}"
-            );
-        }
-    }
 
 
     // ========================================================================
@@ -939,6 +1985,46 @@ public class SpeedController : MonoBehaviour
                 if (hero == null)
                     continue;
 
+                // ============================================================
+                // SNAPSHOT DEL NIVEL ORIGINAL DE ESTA SESIÓN
+                // ============================================================
+
+                if (
+                    !ModState.OriginalLevelByHero.ContainsKey(
+                        hero.heroKey
+                    )
+                )
+                {
+                    ModState.OriginalLevelByHero[
+                        hero.heroKey
+                    ] =
+                        hero.HeroLevel;
+
+                    Plugin.PluginLog?.LogInfo(
+                        $"[TBH] ORIGINAL LEVEL SNAPSHOT | " +
+                        $"Hero={hero.heroKey} " +
+                        $"Level={hero.HeroLevel}"
+                    );
+                }
+
+                if (
+                    !ModState.OriginalAbilityPointsByHero.ContainsKey(
+                        hero.heroKey
+                    )
+                )
+                {
+                    ModState.OriginalAbilityPointsByHero[
+                        hero.heroKey
+                    ] =
+                        hero.AbilityPoint;
+
+
+                    Plugin.PluginLog?.LogInfo(
+                        $"[TBH] ORIGINAL ABILITY SNAPSHOT | " +
+                        $"Hero={hero.heroKey} " +
+                        $"AbilityPoints={hero.AbilityPoint}"
+                    );
+                }
 
                 Plugin.PluginLog?.LogInfo(
                     $"[TBH] HERO[{i}] | " +
@@ -1257,6 +2343,446 @@ public class SpeedController : MonoBehaviour
         }
     }
 
+    private void RestoreHeroOriginalLevel(
+        int heroId
+    )
+    {
+        try
+        {
+            if (
+                !ModState.OriginalLevelByHero.TryGetValue(
+                    heroId,
+                    out int originalLevel
+                )
+            )
+            {
+                Plugin.PluginLog?.LogWarning(
+                    $"[TBH] RESET LEVEL -> " +
+                    $"No existe snapshot para Hero={heroId}"
+                );
+
+                return;
+            }
+
+
+            var manager =
+                bbl.bspl;
+
+
+            if (manager == null)
+            {
+                return;
+            }
+
+
+            PlayerSaveData save =
+                manager.btou;
+
+
+            if (
+                save == null ||
+                save.heroSaveDatas == null
+            )
+            {
+                return;
+            }
+
+
+            HeroSaveData saveHero =
+                null;
+
+
+            for (
+                int i = 0;
+                i < save.heroSaveDatas.Count;
+                i++
+            )
+            {
+                HeroSaveData candidate =
+                    save.heroSaveDatas[i];
+
+
+                if (
+                    candidate != null &&
+                    candidate.heroKey == heroId
+                )
+                {
+                    saveHero =
+                        candidate;
+
+                    break;
+                }
+            }
+
+
+            if (saveHero == null)
+            {
+                return;
+            }
+
+
+            int originalAbilityPoints =
+                saveHero.AbilityPoint;
+
+
+            ModState.OriginalAbilityPointsByHero.TryGetValue(
+                heroId,
+                out originalAbilityPoints
+            );
+
+
+            // ============================================================
+            // RESTAURAR SAVE
+            // ============================================================
+
+            saveHero.HeroLevel =
+                originalLevel;
+
+
+            saveHero.AbilityPoint =
+                originalAbilityPoints;
+
+
+            // ============================================================
+            // RESTAURAR RUNTIME CACHE
+            // ============================================================
+
+            try
+            {
+                vo cache =
+                    vm.uj.ivu(
+                        heroId
+                    );
+
+
+                if (cache != null)
+                {
+                    cache.bfmc =
+                        originalLevel;
+
+
+                    cache.bfme =
+                        originalAbilityPoints;
+                }
+            }
+            catch
+            {
+            }
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] LEVEL RESET | " +
+                $"Hero={heroId} " +
+                $"Level={originalLevel} " +
+                $"AbilityPoints={originalAbilityPoints}"
+            );
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] RestoreHeroOriginalLevel ERROR: " +
+                $"{ex.Message}"
+            );
+        }
+    }
+
+    private void ResetHeroModifications(
+        int heroId
+    )
+    {
+        try
+        {
+            // ============================================================
+            // DAMAGE
+            // ============================================================
+
+            ModState.AttackDamageOverrides.Remove(
+                heroId
+            );
+
+
+            // ============================================================
+            // ATTACK SPEED
+            // ============================================================
+
+            ModState.AttackSpeedOverrides.Remove(
+                heroId
+            );
+
+
+            // ============================================================
+            // MOVEMENT SPEED
+            // ============================================================
+
+            ModState.MovementSpeedOverrides.Remove(
+                heroId
+            );
+
+
+            // Limpiar seguimiento físico del movimiento.
+
+            lastHeroPositions.Remove(
+                heroId
+            );
+
+
+            initializedMovementHeroes.Remove(
+                heroId
+            );
+
+
+            // ============================================================
+            // LEVEL
+            // ============================================================
+
+            RestoreHeroOriginalLevel(
+                heroId
+            );
+
+
+            // ============================================================
+            // FORZAR REFRESH
+            // ============================================================
+
+            UpdateHeroRuntimeMap(
+                heroId
+            );
+
+
+            RefreshHeroSpeeds(
+                heroId
+            );
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] RESET HERO COMPLETE | " +
+                $"Hero={heroId}"
+            );
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] ResetHeroModifications ERROR: " +
+                $"{ex.Message}"
+            );
+        }
+    }
+
+    private void ResetAllModifications()
+    {
+        try
+        {
+            // ============================================================
+            // HEROES
+            // ============================================================
+
+            foreach (
+                int heroId
+                in KnownHeroIds
+            )
+            {
+                ModState.AttackDamageOverrides.Remove(
+                    heroId
+                );
+
+
+                ModState.AttackSpeedOverrides.Remove(
+                    heroId
+                );
+
+
+                ModState.MovementSpeedOverrides.Remove(
+                    heroId
+                );
+
+
+                lastHeroPositions.Remove(
+                    heroId
+                );
+
+
+                initializedMovementHeroes.Remove(
+                    heroId
+                );
+
+
+                RestoreHeroOriginalLevel(
+                    heroId
+                );
+            }
+
+
+            // ============================================================
+            // GAME SPEED
+            // ============================================================
+
+            desiredSpeed =
+                1.0f;
+
+
+            Time.timeScale =
+                1.0f;
+
+
+            File.WriteAllText(
+                SpeedFile,
+                "1.0"
+            );
+
+
+            // ============================================================
+            // GOD MODE
+            // ============================================================
+
+            ModState.GodModeEnabled =
+                false;
+
+
+            File.WriteAllText(
+                GodModeFile,
+                "0"
+            );
+
+
+            // ============================================================
+            // MONEY
+            // ============================================================
+
+            ModState.MoneyMultiplier =
+                1.0f;
+
+
+            File.WriteAllText(
+                MoneyMultiplierFile,
+                "1.0"
+            );
+
+
+            Plugin.PluginLog?.LogInfo(
+                "[TBH] RESET ALL COMPLETE"
+            );
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] ResetAllModifications ERROR: " +
+                $"{ex.Message}"
+            );
+        }
+    }
+
+    private void UpdateResetCommand()
+    {
+        resetCommandTimer +=
+            Time.unscaledDeltaTime;
+
+
+        if (
+            resetCommandTimer <
+            ResetCommandInterval
+        )
+        {
+            return;
+        }
+
+
+        resetCommandTimer =
+            0f;
+
+
+        try
+        {
+            if (!File.Exists(ResetCommandFile))
+            {
+                return;
+            }
+
+
+            string command =
+                File.ReadAllText(
+                    ResetCommandFile
+                ).Trim();
+
+
+            if (
+                string.IsNullOrWhiteSpace(
+                    command
+                ) ||
+                command ==
+                lastResetCommand
+            )
+            {
+                return;
+            }
+
+
+            lastResetCommand =
+                command;
+
+
+            string[] parts =
+                command.Split('|');
+
+
+            if (parts.Length < 1)
+            {
+                return;
+            }
+
+
+            // ============================================================
+            // RESET ALL
+            // ============================================================
+
+            if (
+                string.Equals(
+                    parts[0],
+                    "all",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                ResetAllModifications();
+
+                return;
+            }
+
+
+            // ============================================================
+            // RESET HERO
+            //
+            // Formato:
+            //
+            // hero|201|timestamp
+            // ============================================================
+
+            if (
+                parts.Length >= 2 &&
+                string.Equals(
+                    parts[0],
+                    "hero",
+                    StringComparison.OrdinalIgnoreCase
+                ) &&
+                int.TryParse(
+                    parts[1],
+                    out int heroId
+                )
+            )
+            {
+                ResetHeroModifications(
+                    heroId
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] UpdateResetCommand ERROR: " +
+                $"{ex.Message}"
+            );
+        }
+    }
+
 
     // ========================================================================
     // HERO RUNTIME DEBUG
@@ -1364,14 +2890,21 @@ public class SpeedController : MonoBehaviour
         );
 
         Plugin.PluginLog?.LogInfo(
-            $"[TBH] Override Enabled = " +
-            $"{ModState.AttackDamageEnabled}"
+            $"[TBH] DAMAGE OVERRIDES COUNT = " +
+            $"{ModState.AttackDamageOverrides.Count}"
         );
 
-        Plugin.PluginLog?.LogInfo(
-            $"[TBH] Override Value = " +
-            $"{ModState.AttackDamage}"
-        );
+
+        foreach (
+            KeyValuePair<int, float> pair
+            in ModState.AttackDamageOverrides
+        )
+        {
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] DAMAGE OVERRIDE | " +
+                $"Hero={pair.Key} Value={pair.Value}"
+            );
+        }
 
 
         try
@@ -1723,11 +3256,10 @@ public class SpeedController : MonoBehaviour
             // CAMBIAR VALOR DEL PATCH
             // ========================================================
 
-            ModState.AttackDamage =
+           ModState.AttackDamageOverrides[
+                heroId
+            ] =
                 damage;
-
-            ModState.AttackDamageEnabled =
-                true;
 
             Plugin.PluginLog?.LogInfo(
                 $"[TBH] MOD MENU DAMAGE -> " +
@@ -1893,17 +3425,13 @@ public class SpeedController : MonoBehaviour
                     100f
                 );
 
-            ModState.AttackSpeed =
+            ModState.AttackSpeedOverrides[
+                heroId
+            ] =
                 value;
 
-            ModState.AttackSpeedHeroId =
-                heroId;
-
-            ModState.AttackSpeedEnabled =
-                true;
-
-            lastAttackSpeedCommand =
-                command;
+                lastAttackSpeedCommand =
+                    command;
 
             File.WriteAllText(
                 AttackSpeedFile,
@@ -1912,7 +3440,7 @@ public class SpeedController : MonoBehaviour
                 )
             );
 
-            UpdateAttackSpeedTarget(
+           UpdateHeroRuntimeMap(
                 heroId
             );
 
@@ -1924,12 +3452,60 @@ public class SpeedController : MonoBehaviour
             RefreshHeroSpeeds(
                 heroId
             );
+
+
+            LogHeroSpeedOverrides();
         }
         catch (Exception ex)
         {
             Plugin.PluginLog?.LogWarning(
                 $"[TBH] AttackSpeed command ERROR: {ex.Message}"
             );
+        }
+    }
+
+
+    private void LogHeroSpeedOverrides()
+    {
+        try
+        {
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] ATTACK OVERRIDES COUNT = " +
+                $"{ModState.AttackSpeedOverrides.Count}"
+            );
+
+
+            foreach (
+                KeyValuePair<int, float> pair
+                in ModState.AttackSpeedOverrides
+            )
+            {
+                Plugin.PluginLog?.LogInfo(
+                    $"[TBH] ATTACK OVERRIDE | " +
+                    $"Hero={pair.Key} Value={pair.Value}"
+                );
+            }
+
+
+            Plugin.PluginLog?.LogInfo(
+                $"[TBH] MOVEMENT OVERRIDES COUNT = " +
+                $"{ModState.MovementSpeedOverrides.Count}"
+            );
+
+
+            foreach (
+                KeyValuePair<int, float> pair
+                in ModState.MovementSpeedOverrides
+            )
+            {
+                Plugin.PluginLog?.LogInfo(
+                    $"[TBH] MOVEMENT OVERRIDE | " +
+                    $"Hero={pair.Key} Value={pair.Value}"
+                );
+            }
+        }
+        catch
+        {
         }
     }
 
@@ -1999,27 +3575,14 @@ public class SpeedController : MonoBehaviour
                     125f
                 );
 
-           // Último valor aplicado.
-            // Se conserva por compatibilidad con el resto del plugin.
-            ModState.MovementSpeed =
-                value;
-
-            ModState.MovementSpeedHeroId =
-                heroId;
-
-            ModState.MovementSpeedEnabled =
-                true;
-
-
-            // ========================================================
-            // GUARDAR VELOCIDAD INDEPENDIENTE PARA ESTE HERO
-            // ========================================================
-
-            ModState.MovementSpeedByHero[heroId] =
+            ModState.MovementSpeedOverrides[
+                heroId
+            ] =
                 value;
 
 
-            // Reiniciar solamente el seguimiento de ESTE héroe.
+            // Reiniciar solamente el seguimiento físico de ESTE héroe.
+            // El siguiente LateUpdate tomará como origen su posición actual.
 
             lastHeroPositions.Remove(
                 heroId
@@ -2039,7 +3602,7 @@ public class SpeedController : MonoBehaviour
                 )
             );
 
-            UpdateMovementSpeedTarget(
+            UpdateHeroRuntimeMap(
                 heroId
             );
 
@@ -2051,6 +3614,9 @@ public class SpeedController : MonoBehaviour
             RefreshHeroSpeeds(
                 heroId
             );
+
+
+            LogHeroSpeedOverrides();
         }
         catch (Exception ex)
         {
@@ -2074,6 +3640,7 @@ public class SpeedController : MonoBehaviour
         heroSpeedTargetTimer +=
             Time.unscaledDeltaTime;
 
+
         if (
             heroSpeedTargetTimer <
             HeroSpeedTargetInterval
@@ -2082,39 +3649,107 @@ public class SpeedController : MonoBehaviour
             return;
         }
 
-        heroSpeedTargetTimer = 0f;
 
-        if (
-            ModState.AttackSpeedEnabled &&
-            ModState.AttackSpeedHeroId > 0
-        )
-        {
-            UpdateAttackSpeedTarget(
-                ModState.AttackSpeedHeroId
-            );
-        }
+        heroSpeedTargetTimer =
+            0f;
 
-        if (
-            ModState.MovementSpeedEnabled &&
-            ModState.MovementSpeedByHero.Count > 0
-        )
+
+        RefreshAllHeroRuntimeMaps();
+    }
+
+    // ========================================================================
+    // REFRESH ALL HERO RUNTIME MAPS
+    // ========================================================================
+
+    private void RefreshAllHeroRuntimeMaps()
+    {
+        try
         {
-            List<int> movementHeroIds =
-                new List<int>(
-                    ModState.MovementSpeedByHero.Keys
-                );
+            // Los Hero pueden ser recreados cuando cambia una escena.
+            // Reconstruimos el mapa InstanceID -> HeroId.
+
+            ModState.HeroIdByInstanceId.Clear();
+
 
             foreach (
-                int heroId in movementHeroIds
+                int heroId
+                in KnownHeroIds
             )
             {
-                UpdateMovementSpeedTarget(
+                UpdateHeroRuntimeMap(
                     heroId
                 );
             }
         }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] RefreshAllHeroRuntimeMaps ERROR: {ex.Message}"
+            );
+        }
     }
 
+
+    // ========================================================================
+    // UPDATE ONE HERO RUNTIME MAP
+    // ========================================================================
+
+    private void UpdateHeroRuntimeMap(
+        int heroId
+    )
+    {
+        try
+        {
+            Hero hero =
+                GetRuntimeHero(
+                    heroId
+                );
+
+
+            if (hero == null)
+            {
+                return;
+            }
+
+
+            int actualHeroId =
+                heroId;
+
+
+            // Confirmar la identidad desde el propio objeto Hero.
+            // Si por alguna razón vm.uj.ivu(heroId).bflu apunta a un
+            // objeto cuyo cache pertenece a otro héroe, NO dejamos
+            // que el mapa lo etiquete incorrectamente.
+
+            try
+            {
+                if (
+                    hero.cache != null &&
+                    hero.cache.btet > 0
+                )
+                {
+                    actualHeroId =
+                        hero.cache.btet;
+                }
+            }
+            catch
+            {
+            }
+
+
+            int instanceId =
+                hero.GetInstanceID();
+
+
+            ModState.HeroIdByInstanceId[
+                instanceId
+            ] =
+                actualHeroId;
+        }
+        catch
+        {
+        }
+    }
 
     private Hero GetRuntimeHero(
         int heroId
@@ -2133,127 +3768,6 @@ public class SpeedController : MonoBehaviour
         catch
         {
             return null;
-        }
-    }
-
-
-    private void UpdateAttackSpeedTarget(
-        int heroId
-    )
-    {
-        Hero hero =
-            GetRuntimeHero(heroId);
-
-        if (hero == null)
-        {
-            ModState.AttackSpeedHeroInstanceId =
-                int.MinValue;
-
-            return;
-        }
-
-        ModState.AttackSpeedHeroInstanceId =
-            hero.GetInstanceID();
-    }
-
-
-    private void UpdateMovementSpeedTarget(
-    int heroId
-    )
-    {
-        try
-        {
-            // Debe existir una configuración para este héroe.
-
-            if (
-                !ModState.MovementSpeedByHero.TryGetValue(
-                    heroId,
-                    out float speed
-                )
-            )
-            {
-                return;
-            }
-
-
-            Hero hero =
-                GetRuntimeHero(heroId);
-
-
-            // ========================================================
-            // HERO NO INSTANCIADO
-            // ========================================================
-
-            if (hero == null)
-            {
-                if (
-                    ModState.MovementInstanceByHero.TryGetValue(
-                        heroId,
-                        out int oldInstance
-                    )
-                )
-                {
-                    ModState.MovementSpeedByInstance.Remove(
-                        oldInstance
-                    );
-
-                    ModState.MovementInstanceByHero.Remove(
-                        heroId
-                    );
-                }
-
-                return;
-            }
-
-
-            int newInstance =
-                hero.GetInstanceID();
-
-
-            // ========================================================
-            // ELIMINAR INSTANCE ANTERIOR SI EL JUEGO RECREÓ EL HERO
-            // ========================================================
-
-            if (
-                ModState.MovementInstanceByHero.TryGetValue(
-                    heroId,
-                    out int previousInstance
-                )
-                &&
-                previousInstance != newInstance
-            )
-            {
-                ModState.MovementSpeedByInstance.Remove(
-                    previousInstance
-                );
-            }
-
-
-            // ========================================================
-            // ASOCIAR INSTANCE ACTUAL CON SU VELOCIDAD
-            // ========================================================
-
-            ModState.MovementInstanceByHero[heroId] =
-                newInstance;
-
-            ModState.MovementSpeedByInstance[newInstance] =
-                speed;
-
-
-            // Los mantenemos por compatibilidad.
-
-            ModState.MovementSpeedHeroId =
-                heroId;
-
-            ModState.MovementSpeedHeroInstanceId =
-                newInstance;
-        }
-        catch (Exception ex)
-        {
-            Plugin.PluginLog?.LogWarning(
-                $"[TBH] UpdateMovementSpeedTarget ERROR: " +
-                $"{ex.Message}"
-            );
         }
     }
 
@@ -2294,6 +3808,410 @@ public class SpeedController : MonoBehaviour
         {
             Plugin.PluginLog?.LogWarning(
                 $"[TBH] RefreshHeroSpeeds ERROR: {ex.Message}"
+            );
+        }
+    }
+
+    // ========================================================================
+    // HERO RUNTIME STATE
+    // ========================================================================
+
+    private void UpdateHeroRuntimeState()
+    {
+        heroRuntimeStateTimer +=
+            Time.unscaledDeltaTime;
+
+
+        if (
+            heroRuntimeStateTimer <
+            HeroRuntimeStateInterval
+        )
+        {
+            return;
+        }
+
+
+        heroRuntimeStateTimer =
+            0f;
+
+
+        try
+        {
+            var manager =
+                bbl.bspl;
+
+
+            if (manager == null)
+            {
+                return;
+            }
+
+
+            PlayerSaveData save =
+                manager.btou;
+
+
+            if (
+                save == null ||
+                save.heroSaveDatas == null
+            )
+            {
+                return;
+            }
+
+
+            List<string> lines =
+                new List<string>();
+
+
+            // ============================================================
+            // HEADER
+            // ============================================================
+
+            lines.Add(
+                "#HeroId|Level|OriginalLevel|Unlocked|" +
+                "OriginalDamage|DamageOverride|" +
+                "RealAttackSpeed|AttackOverride|" +
+                "RealMovementSpeed|MovementOverride"
+            );
+
+
+            // ============================================================
+            // HEROES
+            // ============================================================
+
+            foreach (
+                int heroId
+                in KnownHeroIds
+            )
+            {
+                HeroSaveData saveHero =
+                    null;
+
+
+                // --------------------------------------------------------
+                // LOCALIZAR SAVE DEL HÉROE
+                // --------------------------------------------------------
+
+                for (
+                    int i = 0;
+                    i < save.heroSaveDatas.Count;
+                    i++
+                )
+                {
+                    HeroSaveData candidate =
+                        save.heroSaveDatas[i];
+
+
+                    if (
+                        candidate != null &&
+                        candidate.heroKey == heroId
+                    )
+                    {
+                        saveHero =
+                            candidate;
+
+                        break;
+                    }
+                }
+
+
+                if (saveHero == null)
+                {
+                    continue;
+                }
+
+
+                // --------------------------------------------------------
+                // SNAPSHOT ORIGINAL
+                // --------------------------------------------------------
+
+                if (
+                    !ModState.OriginalLevelByHero.ContainsKey(
+                        heroId
+                    )
+                )
+                {
+                    ModState.OriginalLevelByHero[
+                        heroId
+                    ] =
+                        saveHero.HeroLevel;
+                }
+
+
+                // --------------------------------------------------------
+                // FORZAR LECTURA DE VALORES RUNTIME
+                //
+                // Los Harmony Postfix guardan el valor REAL antes de
+                // sustituirlo por un override.
+                // --------------------------------------------------------
+
+                Hero runtimeHero =
+                    GetRuntimeHero(
+                        heroId
+                    );
+
+
+                if (runtimeHero != null)
+                {
+                    try
+                    {
+                        // Estos getters son seguros para refrescar
+                        // Attack Speed y Movement Speed.
+
+                        float attackProbe =
+                            runtimeHero.bsqu;
+
+                        float movementProbe =
+                            runtimeHero.bsrq;
+
+
+                        // Damage solamente se sondea mientras todavía
+                        // no tengamos el snapshot inicial.
+                        //
+                        // Una vez conseguido, NO volvemos a llamar gut()
+                        // desde el monitor de estado.
+
+                        if (
+                            !ModState.OriginalDamageByHero.ContainsKey(
+                                heroId
+                            )
+                        )
+                        {
+                            DamageInfo damageProbe =
+                                runtimeHero.gut();
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+
+                // --------------------------------------------------------
+                // NIVEL
+                // --------------------------------------------------------
+
+                int originalLevel =
+                    saveHero.HeroLevel;
+
+
+                if (
+                    ModState.OriginalLevelByHero.TryGetValue(
+                        heroId,
+                        out int storedOriginalLevel
+                    )
+                )
+                {
+                    originalLevel =
+                        storedOriginalLevel;
+                }
+
+
+                // --------------------------------------------------------
+                // Original Damage
+                // --------------------------------------------------------
+
+                string realDamage =
+                    "NA";
+
+
+                if (
+                    ModState.OriginalDamageByHero.TryGetValue(
+                        heroId,
+                        out float realDamageValue
+                    )
+                )
+                {
+                    realDamage =
+                        realDamageValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // DAMAGE MOD
+                // --------------------------------------------------------
+
+                string damageOverride =
+                    "OFF";
+
+
+                if (
+                    ModState.AttackDamageOverrides.TryGetValue(
+                        heroId,
+                        out float damageOverrideValue
+                    )
+                )
+                {
+                    damageOverride =
+                        damageOverrideValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // ATTACK SPEED REAL
+                // --------------------------------------------------------
+
+                string realAttackSpeed =
+                    "NA";
+
+
+                if (
+                    ModState.RealAttackSpeedByHero.TryGetValue(
+                        heroId,
+                        out float realAttackValue
+                    )
+                )
+                {
+                    realAttackSpeed =
+                        realAttackValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // ATTACK SPEED MOD
+                // --------------------------------------------------------
+
+                string attackOverride =
+                    "OFF";
+
+
+                if (
+                    ModState.AttackSpeedOverrides.TryGetValue(
+                        heroId,
+                        out float attackOverrideValue
+                    )
+                )
+                {
+                    attackOverride =
+                        attackOverrideValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // MOVEMENT REAL
+                // --------------------------------------------------------
+
+                string realMovementSpeed =
+                    "NA";
+
+
+                if (
+                    ModState.RealMovementSpeedByHero.TryGetValue(
+                        heroId,
+                        out float realMovementValue
+                    )
+                )
+                {
+                    realMovementSpeed =
+                        realMovementValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // MOVEMENT MOD
+                // --------------------------------------------------------
+
+                string movementOverride =
+                    "OFF";
+
+
+                if (
+                    ModState.MovementSpeedOverrides.TryGetValue(
+                        heroId,
+                        out float movementOverrideValue
+                    )
+                )
+                {
+                    movementOverride =
+                        movementOverrideValue.ToString(
+                            "0.####",
+                            CultureInfo.InvariantCulture
+                        );
+                }
+
+
+                // --------------------------------------------------------
+                // LINE
+                // --------------------------------------------------------
+
+                string line =
+                    $"{heroId}|" +
+                    $"{saveHero.HeroLevel}|" +
+                    $"{originalLevel}|" +
+                    $"{(saveHero.IsUnLock ? 1 : 0)}|" +
+                    $"{realDamage}|" +
+                    $"{damageOverride}|" +
+                    $"{realAttackSpeed}|" +
+                    $"{attackOverride}|" +
+                    $"{realMovementSpeed}|" +
+                    $"{movementOverride}";
+
+
+                lines.Add(
+                    line
+                );
+            }
+
+
+            // ============================================================
+            // ESCRITURA SEGURA
+            // ============================================================
+
+            string tempFile =
+                HeroRuntimeStateFile +
+                ".tmp";
+
+
+            File.WriteAllLines(
+                tempFile,
+                lines
+            );
+
+
+            File.Copy(
+                tempFile,
+                HeroRuntimeStateFile,
+                true
+            );
+
+
+            File.Delete(
+                tempFile
+            );
+
+
+            if (!heroRuntimeStateLogged)
+            {
+                heroRuntimeStateLogged =
+                    true;
+
+
+                Plugin.PluginLog?.LogInfo(
+                    "[TBH] hero_runtime_state.txt listo."
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.PluginLog?.LogWarning(
+                $"[TBH] UpdateHeroRuntimeState ERROR: " +
+                $"{ex.Message}"
             );
         }
     }
@@ -2707,8 +4625,7 @@ private void LateUpdate()
         // ========================================================
 
         if (
-            !ModState.MovementSpeedEnabled ||
-            ModState.MovementSpeedByHero.Count == 0
+            ModState.MovementSpeedOverrides.Count == 0
         )
         {
             lastHeroPositions.Clear();
@@ -2724,7 +4641,7 @@ private void LateUpdate()
 
         List<KeyValuePair<int, float>> configuredHeroes =
             new List<KeyValuePair<int, float>>(
-                ModState.MovementSpeedByHero
+                ModState.MovementSpeedOverrides
             );
 
 
@@ -2877,9 +4794,34 @@ private void LateUpdate()
             // MULTIPLICADOR INDIVIDUAL
             // ====================================================
 
+            float nativeMovementSpeed =
+                NativeMovementSpeed;
+
+
+            // Si el Harmony Postfix ya capturó el valor real de este héroe,
+            // lo usamos como base en lugar del 8.5 fijo.
+            //
+            // Esto permite respetar diferencias reales entre héroes/buffs
+            // sin perder el sistema físico de movimiento que ya funcionaba.
+
+            if (
+                ModState.RealMovementSpeedByHero.TryGetValue(
+                    heroId,
+                    out float capturedRealMovementSpeed
+                )
+                &&
+                capturedRealMovementSpeed > 0.001f
+            )
+            {
+                nativeMovementSpeed =
+                    capturedRealMovementSpeed;
+            }
+
+
             float multiplier =
                 desiredMovementSpeed /
-                NativeMovementSpeed;
+                nativeMovementSpeed;
+
 
             multiplier =
                 Mathf.Max(
@@ -3149,135 +5091,7 @@ private void MaintainGodModeHealth()
 
 // ============================================================================
 // HARMONY PATCHES
-//
-// Solo se modifica StatType.AttackDamage.
-//
-// Nuestra prueba mostró que estos cinco métodos devolvían el mismo
-// Attack Damage mostrado por STATUS.
-//
 // ============================================================================
-
-
-// ----------------------------------------------------------------------------
-// iwv
-// ----------------------------------------------------------------------------
-
-[HarmonyPatch(
-    typeof(vm.uj),
-    nameof(vm.uj.iwv)
-)]
-internal static class AttackDamagePatch_IWV
-{
-    [HarmonyPostfix]
-    private static void Postfix(
-        StatType a,
-        ref float __result
-    )
-    {
-        ModState.ApplyAttackDamage(
-            a,
-            ref __result
-        );
-    }
-
-    
-}
-
-
-// ----------------------------------------------------------------------------
-// iwy
-// ----------------------------------------------------------------------------
-
-[HarmonyPatch(
-    typeof(vm.uj),
-    nameof(vm.uj.iwy)
-)]
-internal static class AttackDamagePatch_IWY
-{
-    [HarmonyPostfix]
-    private static void Postfix(
-        StatType a,
-        ref float __result
-    )
-    {
-        ModState.ApplyAttackDamage(
-            a,
-            ref __result
-        );
-    }
-}
-
-
-// ----------------------------------------------------------------------------
-// npp
-// ----------------------------------------------------------------------------
-
-[HarmonyPatch(
-    typeof(vm.uj),
-    nameof(vm.uj.npp)
-)]
-internal static class AttackDamagePatch_NPP
-{
-    [HarmonyPostfix]
-    private static void Postfix(
-        StatType a,
-        ref float __result
-    )
-    {
-        ModState.ApplyAttackDamage(
-            a,
-            ref __result
-        );
-    }
-}
-
-
-// ----------------------------------------------------------------------------
-// iht
-// ----------------------------------------------------------------------------
-
-[HarmonyPatch(
-    typeof(vm.uj),
-    nameof(vm.uj.iht)
-)]
-internal static class AttackDamagePatch_IHT
-{
-    [HarmonyPostfix]
-    private static void Postfix(
-        StatType a,
-        ref float __result
-    )
-    {
-        ModState.ApplyAttackDamage(
-            a,
-            ref __result
-        );
-    }
-}
-
-
-// ----------------------------------------------------------------------------
-// jjj
-// ----------------------------------------------------------------------------
-
-[HarmonyPatch(
-    typeof(vm.uj),
-    nameof(vm.uj.jjj)
-)]
-internal static class AttackDamagePatch_JJJ
-{
-    [HarmonyPostfix]
-    private static void Postfix(
-        StatType a,
-        ref float __result
-    )
-    {
-        ModState.ApplyAttackDamage(
-            a,
-            ref __result
-        );
-    }
-}
 
 // ============================================================================
 // REAL HERO DAMAGE PATCH
@@ -3308,22 +5122,98 @@ internal static class HeroDamageInfoPatch
     {
         try
         {
-            // gut pertenece al Unit.
-            // Solo alteramos el resultado cuando
-            // la instancia realmente es un Hero.
             if (!(__instance is Hero))
+            {
                 return;
+            }
 
-            if (!ModState.AttackDamageEnabled)
+
+            if (
+                !ModState.TryGetHeroId(
+                    __instance,
+                    out int heroId
+                )
+            )
+            {
                 return;
+            }
+
+
+            // ====================================================
+            // DAÑO REAL
+            //
+            // Aquí todavía tenemos el resultado calculado
+            // originalmente por Taskbar Hero.
+            // ====================================================
+
+            float realDamage =
+                __result.OriginDamage;
+
+
+            ModState.RealDamageByHero[
+                heroId
+            ] =
+                realDamage;
+
+
+            // ====================================================
+            // SNAPSHOT ORIGINAL
+            //
+            // Solo se guarda UNA VEZ.
+            // No cambia aunque después existan buffs,
+            // ataques especiales, etc.
+            // ====================================================
+
+            if (
+                realDamage > 0f &&
+                !ModState.OriginalDamageByHero.ContainsKey(
+                    heroId
+                )
+            )
+            {
+                ModState.OriginalDamageByHero[
+                    heroId
+                ] =
+                    realDamage;
+
+
+                Plugin.PluginLog?.LogInfo(
+                    $"[TBH] ORIGINAL DAMAGE SNAPSHOT | " +
+                    $"Hero={heroId} Damage={realDamage}"
+                );
+            }
+
+
+            // ====================================================
+            // SIN OVERRIDE
+            //
+            // Si este héroe no está en el Dictionary,
+            // dejamos el resultado original intacto.
+            // ====================================================
+
+            if (
+                !ModState.AttackDamageOverrides.TryGetValue(
+                    heroId,
+                    out float overrideDamage
+                )
+            )
+            {
+                return;
+            }
+
+
+            // ====================================================
+            // APLICAR MOD
+            // ====================================================
 
             __result.OriginDamage =
-                ModState.AttackDamage;
+                overrideDamage;
         }
         catch (Exception ex)
         {
             Plugin.PluginLog?.LogWarning(
-                $"[TBH] HeroDamageInfoPatch ERROR: {ex.Message}"
+                $"[TBH] HeroDamageInfoPatch ERROR: " +
+                $"{ex.Message}"
             );
         }
     }
@@ -3378,30 +5268,64 @@ internal static class HeroAttackSpeedPatch
     {
         try
         {
-            if (!ModState.AttackSpeedEnabled)
-                return;
-
             if (__instance == null)
+            {
                 return;
+            }
+
 
             if (
-                ModState.AttackSpeedHeroInstanceId ==
-                int.MinValue
+                !ModState.TryGetHeroId(
+                    __instance,
+                    out int heroId
+                )
             )
             {
                 return;
             }
 
+
+            // ====================================================
+            // GUARDAR VALOR REAL
+            //
+            // En este punto __result todavía contiene lo que
+            // Taskbar Hero calculó originalmente.
+            // ====================================================
+
+            float realValue =
+                __result;
+
+
+            ModState.RealAttackSpeedByHero[
+                heroId
+            ] =
+                realValue;
+
+
+            // ====================================================
+            // ¿EXISTE OVERRIDE PARA ESTE HÉROE?
+            // ====================================================
+
             if (
-                __instance.GetInstanceID() !=
-                ModState.AttackSpeedHeroInstanceId
+                !ModState.AttackSpeedOverrides.TryGetValue(
+                    heroId,
+                    out float overrideValue
+                )
             )
             {
+                // Ningún cambio activo.
+                // Dejamos el resultado original intacto.
+
                 return;
             }
+
+
+            // ====================================================
+            // APLICAR MOD
+            // ====================================================
 
             __result =
-                ModState.AttackSpeed;
+                overrideValue;
         }
         catch (Exception ex)
         {
@@ -3419,7 +5343,7 @@ internal static class HeroAttackSpeedPatch
 // Unit.bsrq = velocidad de movimiento runtime.
 // En la prueba del Explorador: 8.5
 //
-// El getter pertenece a Unit, pero solamente modificamos el Hero seleccionado.
+// El getter pertenece a Unit, pero aplicamos el override correspondiente a cada Hero.
 // ============================================================================
 
 [HarmonyPatch]
@@ -3464,21 +5388,16 @@ internal static class HeroMovementSpeedPatch
     {
         try
         {
-            if (!ModState.MovementSpeedEnabled)
-                return;
-
             if (!(__instance is Hero))
+            {
                 return;
-
-
-            int instanceId =
-                __instance.GetInstanceID();
+            }
 
 
             if (
-                !ModState.MovementSpeedByInstance.TryGetValue(
-                    instanceId,
-                    out float movementSpeed
+                !ModState.TryGetHeroId(
+                    __instance,
+                    out int heroId
                 )
             )
             {
@@ -3486,14 +5405,46 @@ internal static class HeroMovementSpeedPatch
             }
 
 
+            // ====================================================
+            // VALOR REAL DEL JUEGO
+            // ====================================================
+
+            float realValue =
+                __result;
+
+
+            ModState.RealMovementSpeedByHero[
+                heroId
+            ] =
+                realValue;
+
+
+            // ====================================================
+            // SIN OVERRIDE = COMPORTAMIENTO ORIGINAL
+            // ====================================================
+
+            if (
+                !ModState.MovementSpeedOverrides.TryGetValue(
+                    heroId,
+                    out float overrideValue
+                )
+            )
+            {
+                return;
+            }
+
+
+            // ====================================================
+            // APLICAR MOD
+            // ====================================================
+
             __result =
-                movementSpeed;
+                overrideValue;
         }
         catch (Exception ex)
         {
             Plugin.PluginLog?.LogWarning(
-                $"[TBH] HeroMovementSpeedPatch ERROR: " +
-                $"{ex.Message}"
+                $"[TBH] HeroMovementSpeedPatch ERROR: {ex.Message}"
             );
         }
     }

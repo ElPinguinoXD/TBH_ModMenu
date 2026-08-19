@@ -21,6 +21,9 @@ internal sealed class InstallProgressForm : Form
 
     private string lastStatus =
         string.Empty;
+    
+    private bool isClosing =
+        false;
 
     // ============================================================
     // UNINSTALL BUTTON VISIBILITY
@@ -30,36 +33,72 @@ internal sealed class InstallProgressForm : Form
         bool visible
     )
     {
-        if (
-            IsDisposed ||
-            Disposing
+        try
+        {
+            if (
+                isClosing ||
+                IsDisposed ||
+                Disposing
+            )
+            {
+                return;
+            }
+
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    Invoke(
+                        new Action(
+                            () =>
+                            {
+                                ShowUninstallButton(
+                                    visible
+                                );
+                            }
+                        )
+                    );
+                }
+                catch
+                {
+                }
+
+                return;
+            }
+
+
+            if (
+                uninstallButton == null ||
+                uninstallButton.IsDisposed
+            )
+            {
+                return;
+            }
+
+
+            uninstallButton.Visible =
+                visible;
+        }
+        catch (
+            ObjectDisposedException
         )
         {
-            return;
         }
-
-
-        if (InvokeRequired)
+        catch (
+            InvalidOperationException
+        )
         {
-            BeginInvoke(
-                new Action(
-                    () =>
-                        ShowUninstallButton(
-                            visible
-                        )
-                )
-            );
-
-            return;
         }
-
-
-        uninstallButton.Visible =
-            visible;
     }
 
     public InstallProgressForm()
     {
+
+        FormClosing += (_, _) =>
+        {
+            isClosing = true;
+        };
         // ========================================================
         // FORM
         // ========================================================
@@ -457,6 +496,7 @@ internal sealed class InstallProgressForm : Form
     }
 
 
+
     // ============================================================
     // UPDATE UI
     // ============================================================
@@ -466,63 +506,178 @@ internal sealed class InstallProgressForm : Form
         int percent
     )
     {
-        percent =
-            Math.Clamp(
-                percent,
-                0,
-                100
-            );
-
-
-        statusLabel.Text =
-            status;
-
-
-        percentLabel.Text =
-            $"{percent}%";
-
-
-        int width =
-            (int)(
-                progressTrack.ClientSize.Width *
-                (
-                    percent /
-                    100f
-                )
-            );
-
-
-        progressFill.Width =
-            width;
-
-
-        if (
-            !string.Equals(
-                lastStatus,
-                status,
-                StringComparison.Ordinal
-            )
-        )
+        try
         {
-            logBox.AppendText(
-                $"[{DateTime.Now:HH:mm:ss}] " +
-                status +
-                Environment.NewLine
-            );
+            // ====================================================
+            // NO ACTUALIZAR SI ESTAMOS CERRANDO
+            // ====================================================
+
+            if (
+                isClosing ||
+                IsDisposed ||
+                Disposing
+            )
+            {
+                return;
+            }
 
 
-            lastStatus =
+            // ====================================================
+            // SI VIENE DE OTRO HILO, EJECUTAR EN EL HILO UI
+            //
+            // Usamos Invoke en lugar de BeginInvoke para no dejar
+            // actualizaciones pendientes en la cola de WinForms.
+            // ====================================================
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    Invoke(
+                        new Action(
+                            () =>
+                            {
+                                SetProgress(
+                                    status,
+                                    percent
+                                );
+                            }
+                        )
+                    );
+                }
+                catch
+                {
+                    // La ventana pudo cerrarse mientras esperábamos.
+                }
+
+                return;
+            }
+
+
+            // ====================================================
+            // VALIDAR CONTROLES
+            // ====================================================
+
+            if (
+                statusLabel == null ||
+                percentLabel == null ||
+                progressTrack == null ||
+                progressFill == null ||
+                logBox == null
+            )
+            {
+                return;
+            }
+
+
+            if (
+                statusLabel.IsDisposed ||
+                percentLabel.IsDisposed ||
+                progressTrack.IsDisposed ||
+                progressFill.IsDisposed ||
+                logBox.IsDisposed
+            )
+            {
+                return;
+            }
+
+
+            percent =
+                Math.Clamp(
+                    percent,
+                    0,
+                    100
+                );
+
+
+            // ====================================================
+            // STATUS
+            // ====================================================
+
+            statusLabel.Text =
                 status;
 
 
-            logBox.SelectionStart =
-                logBox.TextLength;
+            percentLabel.Text =
+                $"{percent}%";
 
 
-            logBox.ScrollToCaret();
+            // ====================================================
+            // PROGRESS BAR
+            // ====================================================
+
+            int width =
+                (int)(
+                    progressTrack.ClientSize.Width *
+                    (
+                        percent /
+                        100f
+                    )
+                );
+
+
+            progressFill.Width =
+                width;
+
+
+            // ====================================================
+            // LOG
+            // ====================================================
+
+            if (
+                !string.Equals(
+                    lastStatus,
+                    status,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                string line =
+                    $"[{DateTime.Now:HH:mm:ss}] " +
+                    status +
+                    Environment.NewLine;
+
+
+                if (!logBox.IsDisposed)
+                {
+                    logBox.AppendText(
+                        line
+                    );
+
+
+                    logBox.SelectionStart =
+                        logBox.TextLength;
+
+
+                    logBox.ScrollToCaret();
+                }
+
+
+                lastStatus =
+                    status;
+            }
+
+
+            if (
+                !isClosing &&
+                !IsDisposed
+            )
+            {
+                Refresh();
+            }
         }
-
-
-        Refresh();
+        catch (
+            ObjectDisposedException
+        )
+        {
+            // Normal si la ventana se cerró justo
+            // durante una actualización.
+        }
+        catch (
+            InvalidOperationException
+        )
+        {
+            // El handle desapareció durante la actualización.
+        }
     }
 }

@@ -234,37 +234,36 @@ internal static class Program
         Task<bool> waitTask =
             ModInstaller.WaitForModReadyAsync(
                 (
+                message,
+                percent
+            ) =>
+            {
+                if (
+                    startupCancellation
+                        .IsCancellationRequested ||
+                    installer.IsDisposed ||
+                    installer.Disposing
+                )
+                {
+                    return;
+                }
+
+
+                if (
+                    ModInstaller.IsGameRunning()
+                )
+                {
+                    installer.ShowUninstallButton(
+                        false
+                    );
+                }
+
+
+                installer.SetProgress(
                     message,
                     percent
-                ) =>
-                {
-                    if (
-                        startupCancellation
-                            .IsCancellationRequested
-                    )
-                    {
-                        return;
-                    }
-
-
-                    // Cuando el juego aparece ya no permitimos
-                    // desinstalar archivos mientras están cargados.
-
-                    if (
-                        ModInstaller.IsGameRunning()
-                    )
-                    {
-                        installer.ShowUninstallButton(
-                            false
-                        );
-                    }
-
-
-                    installer.SetProgress(
-                        message,
-                        percent
-                    );
-                },
+                );
+},
 
                 startupCancellation.Token
             );

@@ -52,6 +52,11 @@
       <HintPath>C:\Program Files (x86)\Steam\steamapps\common\TaskbarHero\BepInEx\core\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\TaskbarHero\BepInEx\interop\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

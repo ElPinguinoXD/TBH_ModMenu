@@ -47,6 +47,78 @@ internal static class ModInstaller
             )
         );
     }
+
+    private static void ConfigureBepInEx(
+        string gameDirectory
+    )
+    {
+        try
+        {
+            string configDirectory =
+                Path.Combine(
+                    gameDirectory,
+                    "BepInEx",
+                    "config"
+                );
+
+            Directory.CreateDirectory(
+                configDirectory
+            );
+
+            string configPath =
+                Path.Combine(
+                    configDirectory,
+                    "BepInEx.cfg"
+                );
+
+            string text =
+                File.Exists(configPath)
+                    ? File.ReadAllText(configPath)
+                    : string.Empty;
+
+            if (
+                Regex.IsMatch(
+                    text,
+                    @"(?im)^\s*UnityLogListening\s*=\s*(true|false)\s*$"
+                )
+            )
+            {
+                text =
+                    Regex.Replace(
+                        text,
+                        @"(?im)^\s*UnityLogListening\s*=\s*(true|false)\s*$",
+                        "UnityLogListening = false"
+                    );
+            }
+            else
+            {
+                if (
+                    !text.Contains(
+                        "[Logging]",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    text +=
+                        Environment.NewLine +
+                        "[Logging]" +
+                        Environment.NewLine;
+                }
+
+                text +=
+                    "UnityLogListening = false" +
+                    Environment.NewLine;
+            }
+
+            File.WriteAllText(
+                configPath,
+                text
+            );
+        }
+        catch
+        {
+        }
+    }
     // ============================================================
     // MAIN INSTALL
     // ============================================================
@@ -266,6 +338,16 @@ internal static class ModInstaller
             // ====================================================
 
             ExtractPayload(
+                gameDirectory
+            );
+
+            ReportProgress(
+                progress,
+                "Configurando BepInEx...",
+                72
+            );
+
+            ConfigureBepInEx(
                 gameDirectory
             );
 
