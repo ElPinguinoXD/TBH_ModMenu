@@ -145,8 +145,18 @@ moneymultiplier.txt
 Release/
 InstallerPayload/
 
-TBHModMenu/Payload.zip
+# ==========================================================
+# RELEASE / INSTALADOR GENERADO
+# ==========================================================
+
+Release/
+InstallerPayload/
+
+# Payload necesario para compilar TBHModMenu
+!TBHModMenu/Payload.zip
 
 # Publicaciones .NET
 **/bin/
 **/obj/
+
+HeroAnimations/
